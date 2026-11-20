@@ -10,25 +10,23 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AuthedRouteImport } from './routes/_authed'
-import { Route as AuthedDemoRouteImport } from './routes/_authed/demo'
+import { Route as ExploreRouteImport } from './routes/explore'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
 import { Route as LoginIndexRouteImport } from './routes/login/index'
 import { Route as LoginCodeRouteImport } from './routes/login/code'
+import { Route as MediaSplatRouteImport } from './routes/media.$'
+import { Route as PPublicationIdRouteImport } from './routes/p.$publicationId'
+import { Route as UHandleRouteImport } from './routes/u.$handle'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthedRoute = AuthedRouteImport.update({
-  id: '/_authed',
+const ExploreRoute = ExploreRouteImport.update({
+  id: '/explore',
+  path: '/explore',
   getParentRoute: () => rootRouteImport,
-} as any)
-const AuthedDemoRoute = AuthedDemoRouteImport.update({
-  id: '/demo',
-  path: '/demo',
-  getParentRoute: () => AuthedRoute,
 } as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
   id: '/api/$',
@@ -45,50 +43,94 @@ const LoginCodeRoute = LoginCodeRouteImport.update({
   path: '/login/code',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MediaSplatRoute = MediaSplatRouteImport.update({
+  id: '/media/$',
+  path: '/media/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PPublicationIdRoute = PPublicationIdRouteImport.update({
+  id: '/p/$publicationId',
+  path: '/p/$publicationId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UHandleRoute = UHandleRouteImport.update({
+  id: '/u/$handle',
+  path: '/u/$handle',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/demo': typeof AuthedDemoRoute
+  '/explore': typeof ExploreRoute
   '/api/$': typeof ApiSplatRoute
   '/login/code': typeof LoginCodeRoute
+  '/media/$': typeof MediaSplatRoute
+  '/p/$publicationId': typeof PPublicationIdRoute
+  '/u/$handle': typeof UHandleRoute
   '/login/': typeof LoginIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/demo': typeof AuthedDemoRoute
+  '/explore': typeof ExploreRoute
   '/api/$': typeof ApiSplatRoute
   '/login/code': typeof LoginCodeRoute
+  '/media/$': typeof MediaSplatRoute
+  '/p/$publicationId': typeof PPublicationIdRoute
+  '/u/$handle': typeof UHandleRoute
   '/login': typeof LoginIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/_authed': typeof AuthedRouteWithChildren
-  '/_authed/demo': typeof AuthedDemoRoute
+  '/explore': typeof ExploreRoute
   '/api/$': typeof ApiSplatRoute
   '/login/code': typeof LoginCodeRoute
+  '/media/$': typeof MediaSplatRoute
+  '/p/$publicationId': typeof PPublicationIdRoute
+  '/u/$handle': typeof UHandleRoute
   '/login/': typeof LoginIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/demo' | '/api/$' | '/login/code' | '/login/'
+  fullPaths:
+    | '/'
+    | '/explore'
+    | '/api/$'
+    | '/login/code'
+    | '/media/$'
+    | '/p/$publicationId'
+    | '/u/$handle'
+    | '/login/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/demo' | '/api/$' | '/login/code' | '/login'
+  to:
+    | '/'
+    | '/explore'
+    | '/api/$'
+    | '/login/code'
+    | '/media/$'
+    | '/p/$publicationId'
+    | '/u/$handle'
+    | '/login'
   id:
     | '__root__'
     | '/'
-    | '/_authed'
-    | '/_authed/demo'
+    | '/explore'
     | '/api/$'
     | '/login/code'
+    | '/media/$'
+    | '/p/$publicationId'
+    | '/u/$handle'
     | '/login/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AuthedRoute: typeof AuthedRouteWithChildren
+  ExploreRoute: typeof ExploreRoute
   ApiSplatRoute: typeof ApiSplatRoute
   LoginCodeRoute: typeof LoginCodeRoute
+  MediaSplatRoute: typeof MediaSplatRoute
+  PPublicationIdRoute: typeof PPublicationIdRoute
+  UHandleRoute: typeof UHandleRoute
   LoginIndexRoute: typeof LoginIndexRoute
 }
 
@@ -101,19 +143,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authed': {
-      id: '/_authed'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AuthedRouteImport
+    '/explore': {
+      id: '/explore'
+      path: '/explore'
+      fullPath: '/explore'
+      preLoaderRoute: typeof ExploreRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/_authed/demo': {
-      id: '/_authed/demo'
-      path: '/demo'
-      fullPath: '/demo'
-      preLoaderRoute: typeof AuthedDemoRouteImport
-      parentRoute: typeof AuthedRoute
     }
     '/api/$': {
       id: '/api/$'
@@ -136,25 +171,38 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/media/$': {
+      id: '/media/$'
+      path: '/media/$'
+      fullPath: '/media/$'
+      preLoaderRoute: typeof MediaSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/p/$publicationId': {
+      id: '/p/$publicationId'
+      path: '/p/$publicationId'
+      fullPath: '/p/$publicationId'
+      preLoaderRoute: typeof PPublicationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/u/$handle': {
+      id: '/u/$handle'
+      path: '/u/$handle'
+      fullPath: '/u/$handle'
+      preLoaderRoute: typeof UHandleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
-interface AuthedRouteChildren {
-  AuthedDemoRoute: typeof AuthedDemoRoute
-}
-
-const AuthedRouteChildren: AuthedRouteChildren = {
-  AuthedDemoRoute: AuthedDemoRoute,
-}
-
-const AuthedRouteWithChildren =
-  AuthedRoute._addFileChildren(AuthedRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AuthedRoute: AuthedRouteWithChildren,
+  ExploreRoute: ExploreRoute,
   ApiSplatRoute: ApiSplatRoute,
   LoginCodeRoute: LoginCodeRoute,
+  MediaSplatRoute: MediaSplatRoute,
+  PPublicationIdRoute: PPublicationIdRoute,
+  UHandleRoute: UHandleRoute,
   LoginIndexRoute: LoginIndexRoute,
 }
 export const routeTree = rootRouteImport

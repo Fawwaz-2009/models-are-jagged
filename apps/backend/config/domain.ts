@@ -34,6 +34,27 @@ export const websiteDomain = Effect.gen(function* () {
 });
 
 /**
+ * The public catalog's hostname. One label UNDER the zone, not two:
+ * `<slug>-pub.<root>` in production, `<slug>-<stage>-pub.<root>` on every
+ * other stage. A `pub.<slug>.<root>` name sits below the zone's wildcard
+ * certificate and fails the TLS handshake; keeping the catalog on the same
+ * label depth as the studio costs nothing and uses the certificate the zone
+ * already owns. Null when no root domain is configured; the app then falls
+ * back to its own origin for public links and assets.
+ */
+export const publicWebsiteDomain = Effect.gen(function* () {
+  const appSlug = yield* Config.String("APP_SLUG").pipe(Config.withDefault("app"), Effect.orDie);
+  const baseDomain = yield* Config.option(Config.String("ROOT_DOMAIN")).pipe(Effect.orDie);
+  const stack = yield* Effect.serviceOption(Stack);
+  if (stack._tag === "None") {
+    return yield* Effect.die("publicWebsiteDomain: no synthesis context (Stack service missing)");
+  }
+  const stage = stack.value.stage;
+  if (baseDomain._tag === "None") return null;
+  return stage === "prod" ? `${appSlug}-pub.${baseDomain.value}` : `${appSlug}-${stage}-pub.${baseDomain.value}`;
+});
+
+/**
  * Deterministic per-stage dev port: parallel `alchemy dev` sessions isolate
  * by STAGE, never by drifting ports. Deployed stages never read this. The
  * salt namespaces ports within one stage (the website is not the backend).

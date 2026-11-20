@@ -1,50 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Boring } from "./-components/boring";
-import { BuiltWith } from "./-components/built-with";
-import { Faq } from "./-components/faq";
-import { Features } from "./-components/features";
-import { Footer } from "./-components/footer";
-import { GettingStarted } from "./-components/getting-started";
-import { Hero } from "./-components/hero";
-import { Nav } from "./-components/nav";
+import { useAppMeta } from "../components/brand.tsx";
+import { PublicCatalogPage } from "../components/public/public-catalog.tsx";
+import { Studio } from "../components/studio/studio.tsx";
 
 export const Route = createFileRoute("/")({
-  component: Storefront,
-  head: () => ({
-    meta: [
-      {
-        name: "description",
-        content:
-          "Proof is a starter with a pipeline: an agent builds each issue in isolation, every pull request ships with a running proof on your own domain, and merge ships it.",
-      },
-    ],
+  validateSearch: (search: Record<string, unknown>): { publish?: string } => ({
+    publish: typeof search.publish === "string" ? search.publish : undefined,
   }),
+  component: Home,
 });
 
-// The stage strip only speaks on preview deploys of this repository: the
-// prod deploy is the product page, and it never calls itself a preview.
-const isPreview = (stage: string) => stage.startsWith("pr-");
+function Home() {
+  const meta = useAppMeta();
+  const { publish } = Route.useSearch();
 
-function Storefront() {
-  const { stage } = Route.useLoaderData() ?? { stage: "" };
-
-  return (
-    <div className="min-h-svh">
-      {isPreview(stage) ? (
-        <div className="border-b border-primary/20 bg-primary/5 px-6 py-1.5 text-center text-xs font-semibold tracking-wide text-primary">
-          PROOF &middot; {stage.toUpperCase()} &middot; DESTROYED ON MERGE
-        </div>
-      ) : null}
-      <Nav />
-      <main>
-        <Hero />
-        <BuiltWith />
-        <Boring />
-        <Features />
-        <GettingStarted />
-        <Faq />
-      </main>
-      <Footer />
-    </div>
-  );
+  if (meta.publicMode) return <PublicCatalogPage />;
+  return <Studio initialPublishId={publish} />;
 }
