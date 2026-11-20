@@ -34,6 +34,24 @@ export const websiteDomain = Effect.gen(function* () {
 });
 
 /**
+ * The public catalog's hostname. Same stage rules as the app, with a `pub.`
+ * label: `<pub>.<slug>.<root>` in production, `<pub>.<slug>-<stage>.<root>`
+ * on every other stage. Null when no root domain is configured; the app then
+ * falls back to its own origin for public links and assets.
+ */
+export const publicWebsiteDomain = Effect.gen(function* () {
+  const appSlug = yield* Config.String("APP_SLUG").pipe(Config.withDefault("app"), Effect.orDie);
+  const baseDomain = yield* Config.option(Config.String("ROOT_DOMAIN")).pipe(Effect.orDie);
+  const stack = yield* Effect.serviceOption(Stack);
+  if (stack._tag === "None") {
+    return yield* Effect.die("publicWebsiteDomain: no synthesis context (Stack service missing)");
+  }
+  const stage = stack.value.stage;
+  if (baseDomain._tag === "None") return null;
+  return stage === "prod" ? `pub.${appSlug}.${baseDomain.value}` : `pub.${appSlug}-${stage}.${baseDomain.value}`;
+});
+
+/**
  * Deterministic per-stage dev port: parallel `alchemy dev` sessions isolate
  * by STAGE, never by drifting ports. Deployed stages never read this. The
  * salt namespaces ports within one stage (the website is not the backend).

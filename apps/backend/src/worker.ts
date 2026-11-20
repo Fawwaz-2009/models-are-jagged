@@ -3,24 +3,16 @@ import * as Cloudflare from "alchemy/Cloudflare";
 import { ALCHEMY_DEV } from "alchemy/Phase";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
-import { Etag, HttpRouter } from "effect/http";
+import { HttpRouter, HttpServerResponse } from "effect/http";
 import { HttpServerRequest } from "effect/http/HttpServerRequest";
-import * as HttpPlatform from "effect/http/HttpPlatform";
-import { HttpApiBuilder } from "effect/http-api";
 import { Auth } from "../config/auth.ts";
 import { AppDatabase } from "../config/database/index.ts";
-import { MemoryFsLive } from "../config/memory-fs.ts";
-import { devPort, websiteDomain } from "../config/domain.ts";
+import { devPort, publicWebsiteDomain, websiteDomain } from "../config/domain.ts";
 import * as Config from "effect/Config";
-import { Redacted } from "effect";
 import { clientIp, RateLimits } from "../config/rate-limit.ts";
-import { AppApi } from "./contracts/index.ts";
-import { ApiHandlers } from "./controllers/index.ts";
-import { NotesLive } from "./domain/notes.ts";
-import { AuthenticatedLive } from "./middlewares/authentication.ts";
-import { SchemaErrorHandlerLive } from "./middlewares/schema-error.ts";
-import { Files, FilesBucket } from "../config/storage.ts";
+import { Files } from "../config/storage.ts";
+import { PublicationFailure, Publications, PublicationsLive } from "./domain/publications.ts";
+import type { PublishInput } from "./contracts/publications.ts";
 
 /**
  * The Worker entry — the Init gen constructs each service once and builds the
@@ -29,8 +21,9 @@ import { Files, FilesBucket } from "../config/storage.ts";
  * reaches alchemy requires only what alchemy serves per request.
  */
 
-/** Platform services the HttpApi builder needs. Multipart files persist into the in-memory filesystem. */
-const HttpServicesLive = Layer.mergeAll(Path.layer, Etag.layerWeak, HttpPlatform.layer).pipe(Layer.provideMerge(MemoryFsLive));
+/** Raw publication routes answer Web-shaped JSON; failures stay typed by status. */
+const json = (body: unknown, status = 200) => HttpServerResponse.jsonUnsafe(body, { status });
+const errorJson = (status: number, message: string) => json({ error: message }, status);
 
 export default class Backend extends Cloudflare.Worker<Backend>()(
   "Backend",
@@ -40,9 +33,8 @@ export default class Backend extends Cloudflare.Worker<Backend>()(
   Effect.gen(function* () {
     const port = yield* devPort();
     const isDev = yield* Effect.orDie(ALCHEMY_DEV);
-    const filesBucket = yield* FilesBucket;
-    const { accountId } = yield* yield* Cloudflare.CloudflareEnvironment;
     const websiteUrl = yield* websiteDomain;
+    const publicWebsiteUrl = yield* publicWebsiteDomain;
     return {
       main: import.meta.filename,
       workersDev: false,
@@ -67,14 +59,7 @@ export default class Backend extends Cloudflare.Worker<Backend>()(
         // Without ROOT_DOMAIN the site lives on the platform host, and the
         // wildcard admits whatever `<name>.<account>.workers.dev` resolves
         // to. With one, only the stage's custom host is trusted.
-        AUTH_ALLOWED_HOSTS: `localhost:*,127.0.0.1:*,${websiteUrl ?? "*.workers.dev"}`,
-        R2_BUCKET_NAME: filesBucket.bucketName,
-        R2_ACCOUNT_ID: accountId,
-        // Optional by design: without them the app deploys, destroys, and
-        // serves; images simply render without presigned URLs. CI always
-        // receives minted values from the ceremony.
-        R2_ACCESS_KEY_ID: yield* Config.String("R2_ACCESS_KEY_ID").pipe(Config.withDefault(""), Effect.orDie),
-        R2_SECRET_ACCESS_KEY: yield* Config.Redacted("R2_SECRET_ACCESS_KEY").pipe(Config.withDefault(Redacted.make("")), Effect.orDie),
+        AUTH_ALLOWED_HOSTS: `localhost:*,127.0.0.1:*,${websiteUrl ?? "*.workers.dev"}${publicWebsiteUrl ? `,${publicWebsiteUrl}` : ""}`,
       },
     };
   }),
@@ -84,8 +69,6 @@ export default class Backend extends Cloudflare.Worker<Backend>()(
     const authInstance = yield* Effect.provide(Auth, Auth.Live);
     const rateLimits = yield* Effect.provide(RateLimits, RateLimits.Live);
 
-    // Product surface: Notes group behind the authentication middleware.
-    const ApiRoutesLive = HttpApiBuilder.layer(AppApi);
     // Better Auth: its own framework, mounted as a raw catch-all before the
     // typed API. Tier 2 sits in front: 5 auth requests per minute per IP.
     // Every auth request can cost a real email, so floods stop here before
@@ -103,19 +86,108 @@ export default class Backend extends Cloudflare.Worker<Backend>()(
       ),
     ]);
 
+    // The publication surface deliberately sits outside the typed HttpApi:
+    // the payload carries base64 bytes, and the public feed is consumed by
+    // both Workers through the same JSON shape. Auth still comes from the
+    // shared Better Auth instance; the public reads never touch it.
+    const PublicationRoutesLive = HttpRouter.addAll([
+      HttpRouter.route(
+        "POST",
+        "/api/publish",
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest;
+          const contentLength = Number(request.headers["content-length"] ?? "0");
+          if (Number.isFinite(contentLength) && contentLength > 45 * 1024 * 1024) {
+            return errorJson(413, "The publication is larger than 45 MiB on the wire.");
+          }
+
+          const session = yield* authInstance.getSession(new Headers(request.headers)).pipe(Effect.orDie);
+          if (!session?.user) return errorJson(401, "Sign in to publish.");
+
+          const body = yield* request.json.pipe(Effect.catch(() => Effect.succeed(null)));
+          if (body === null || typeof body !== "object") return errorJson(400, "Send a JSON publication.");
+
+          const publications = yield* Publications;
+          const result = yield* publications
+            .publish(
+              {
+                id: session.user.id,
+                email: session.user.email,
+                name: session.user.name || session.user.email,
+              },
+              body as unknown as PublishInput,
+            )
+            .pipe(Effect.catch((error) => Effect.succeed(error)));
+
+          if (result instanceof PublicationFailure) return errorJson(result.status, result.message);
+          return json(result);
+        }),
+      ),
+      HttpRouter.route(
+        "DELETE",
+        "/api/publications/:id",
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest;
+          const session = yield* authInstance.getSession(new Headers(request.headers)).pipe(Effect.orDie);
+          if (!session?.user) return errorJson(401, "Sign in to unpublish.");
+
+          const url = new URL(request.url);
+          const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+          if (!id) return errorJson(400, "Missing publication id.");
+
+          const publications = yield* Publications;
+          const result = yield* publications
+            .unpublish(
+              {
+                id: session.user.id,
+                email: session.user.email,
+                name: session.user.name || session.user.email,
+              },
+              id,
+            )
+            .pipe(Effect.catch((error) => Effect.succeed(error)));
+
+          if (result instanceof PublicationFailure) return errorJson(result.status, result.message);
+          return json(result);
+        }),
+      ),
+      HttpRouter.route(
+        "GET",
+        "/api/public/feed",
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest;
+          const url = new URL(request.url);
+          const handle = url.searchParams.get("handle")?.trim() || undefined;
+          const requested = Number(url.searchParams.get("limit") ?? 48);
+          const limit = Number.isFinite(requested) ? requested : 48;
+          const publications = yield* Publications;
+          return json(yield* publications.feed(handle, limit));
+        }),
+      ),
+      HttpRouter.route(
+        "GET",
+        "/api/public/publications/:id",
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest;
+          const url = new URL(request.url);
+          const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+          if (!id) return errorJson(400, "Missing publication id.");
+          const publications = yield* Publications;
+          const detail = yield* publications.publication(id);
+          if (!detail) return errorJson(404, "Publication not found.");
+          return json(detail);
+        }),
+      ),
+    ]);
+
     // The discharge edge: everything the routes need is provided HERE, before
     // toHttpEffect, so the resulting fetch carries no requirements that
     // alchemy cannot satisfy per request.
 
-    const appLayer = Layer.mergeAll(ApiRoutesLive, AuthRoutesLive).pipe(
-      Layer.provide(ApiHandlers),
-      Layer.provide(AuthenticatedLive),
-      Layer.provide(Auth.Live),
-      Layer.provide(NotesLive),
-      Layer.provide(HttpServicesLive),
+    const appLayer = Layer.mergeAll(AuthRoutesLive, PublicationRoutesLive).pipe(
+      HttpRouter.provideRequest(PublicationsLive),
       Layer.provide(AppDatabase.Live),
       Layer.provide(Files.Live),
-      Layer.provide(SchemaErrorHandlerLive),
       Layer.provide(Alchemy.RuntimeContext.phantom),
     );
     const app = yield* HttpRouter.toHttpEffect(appLayer);
