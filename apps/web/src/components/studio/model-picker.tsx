@@ -1,4 +1,4 @@
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ModelInfo } from "../../lib/types.ts";
 
@@ -8,14 +8,16 @@ export function ModelPicker({
   selectedIds,
   onToggle,
   emptyLabel,
-  accent = false,
+  onRefresh,
+  align = "left",
 }: {
   label: string;
   models: readonly ModelInfo[];
   selectedIds: readonly string[];
   onToggle: (id: string) => void;
   emptyLabel: string;
-  accent?: boolean;
+  onRefresh?: () => void;
+  align?: "left" | "right";
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -23,16 +25,16 @@ export function ModelPicker({
 
   useEffect(() => {
     if (!open) return;
-    const onPointer = (event: MouseEvent) => {
+    const onPointer = (event: PointerEvent) => {
       if (root.current && !root.current.contains(event.target as Node)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
-    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
@@ -47,10 +49,10 @@ export function ModelPicker({
   const buttonText = selectedModels.length === 0 ? emptyLabel : selectedModels.length === 1 ? selectedModels[0]!.name : `${selectedModels.length} selected`;
 
   return (
-    <div className="model-picker" ref={root}>
+    <div className="picker" ref={root} data-align={align}>
       <button
         type="button"
-        className="model-button"
+        className="picker-button"
         data-open={open}
         data-empty={selectedModels.length === 0}
         onClick={() => setOpen((value) => !value)}
@@ -58,38 +60,47 @@ export function ModelPicker({
         aria-expanded={open}
         title={selectedModels.map((model) => model.name).join(", ") || emptyLabel}
       >
-        {accent ? <span className="text-[var(--acid)]">{label}</span> : <span className="text-[rgba(246,241,228,0.45)]">{label}</span>}
-        <span>{buttonText}</span>
-        <ChevronDown size={11} className="ml-auto shrink-0 opacity-60" />
+        <span className="picker-label">{label}</span>
+        <span className="picker-value">{buttonText}</span>
+        <ChevronDown size={12} className="picker-chevron" />
       </button>
 
       {open ? (
-        <div className="model-picker-panel" role="dialog" aria-label={label}>
-          <div className="model-picker-head">
-            <Search size={13} className="shrink-0 text-[var(--muted)]" />
-            <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter models" aria-label={`Filter ${label}`} />
-            <span className="mono shrink-0 text-[8px] tracking-[0.08em] text-[var(--muted)]">{selectedIds.length} PICKED</span>
+        <div className="picker-panel" role="dialog" aria-label={label}>
+          <div className="picker-search">
+            <Search size={14} />
+            <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search models" aria-label={`Search ${label}`} />
           </div>
-          <div className="model-picker-list">
-            {filtered.length === 0 ? <p className="model-picker-empty">No models match. Try another name, or refresh the list in settings.</p> : null}
-            {filtered.map((model) => {
-              const checked = selectedIds.includes(model.id);
-              return (
-                <label className="model-picker-row" key={model.id}>
-                  <input type="checkbox" checked={checked} onChange={() => onToggle(model.id)} />
-                  <span className="min-w-0">
-                    <span className="block truncate">{model.name}</span>
-                    <span className="model-picker-id">{model.id}</span>
-                  </span>
-                </label>
-              );
-            })}
+          <div className="picker-list">
+            {filtered.length === 0 ? (
+              <p className="picker-empty">No models match. Refresh the list or try another name.</p>
+            ) : (
+              filtered.map((model) => {
+                const checked = selectedIds.includes(model.id);
+                return (
+                  <label className="picker-row" key={model.id}>
+                    <input type="checkbox" checked={checked} onChange={() => onToggle(model.id)} />
+                    <span className="picker-row-copy">
+                      <span className="picker-row-name">{model.name}</span>
+                      <span className="picker-row-id">{model.id}</span>
+                    </span>
+                  </label>
+                );
+              })
+            )}
           </div>
-          <div className="flex items-center justify-between gap-2 border-t border-[var(--line-soft)] p-2">
-            <span className="mono text-[8px] uppercase tracking-[0.1em] text-[var(--muted)]">{models.length} available</span>
-            <button type="button" className="btn btn-small" onClick={() => setOpen(false)}>
-              Done
-            </button>
+          <div className="picker-foot">
+            <span>{models.length} available</span>
+            <div className="picker-foot-actions">
+              {onRefresh ? (
+                <button type="button" className="btn btn-quiet btn-sm" onClick={onRefresh}>
+                  <RefreshCw size={11} /> Refresh
+                </button>
+              ) : null}
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOpen(false)}>
+                Done
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

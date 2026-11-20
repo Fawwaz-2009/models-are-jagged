@@ -4,9 +4,6 @@ import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 import { useForm } from "react-hook-form";
 import { authClient } from "../../auth-client.ts";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { AuthCard } from "./-components/auth-card";
 
 export const Route = createFileRoute("/login/code")({
@@ -30,9 +27,8 @@ type CodeValues = typeof codeFormSchema.Type;
 function CodePage() {
   const { email, redirect: redirectTo } = Route.useSearch();
 
-  // Capture stages: a six-digit local part IS the code (config/auth.ts in
-  // the backend), so the field prefills with no backend call. In prod the
-  // code is random and arrives by email.
+  // Capture stages: a six-digit local part IS the code, so the field
+  // prefills with no backend call. In production the code arrives by email.
   const chosen = /^(\d{6})@/.exec(email)?.[1];
   const autofilled = Boolean(chosen);
 
@@ -54,28 +50,37 @@ function CodePage() {
   return (
     <AuthCard title="Enter your code" description={`We sent a 6-digit code to ${email}.`}>
       <form onSubmit={codeForm.handleSubmit((values) => verifyCode.mutate(values))} className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="otp">Code</Label>
-          <Input id="otp" inputMode="numeric" autoComplete="one-time-code" {...codeForm.register("code")} aria-invalid={Boolean(codeForm.formState.errors.code)} />
+        <div className="field">
+          <label className="field-label" htmlFor="otp">
+            Code
+          </label>
+          <input
+            id="otp"
+            className="input"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            {...codeForm.register("code")}
+            aria-invalid={Boolean(codeForm.formState.errors.code)}
+          />
           {codeForm.formState.errors.code ? (
-            <p className="text-sm text-destructive" role="alert">
+            <p className="field-error" role="alert">
               {codeForm.formState.errors.code.message}
             </p>
           ) : null}
-          {autofilled ? <p className="text-xs text-muted-foreground">Dev shortcut: the code is the six digits in the address. No email was sent.</p> : null}
+          {autofilled ? <p className="field-help">Dev shortcut: the code is the six digits in the address. No email was sent.</p> : null}
         </div>
-        <Button type="submit" disabled={verifyCode.isPending} className="w-full">
-          {verifyCode.isPending ? "Verifying..." : "Verify and continue"}
-        </Button>
+        <button type="submit" disabled={verifyCode.isPending} className="btn btn-primary w-full">
+          {verifyCode.isPending ? "Verifying" : "Verify and continue"}
+        </button>
         {verifyCode.isError ? (
-          <p className="text-sm text-destructive" role="alert">
+          <p className="field-error" role="alert">
             {verifyCode.error instanceof Error ? verifyCode.error.message : "We could not verify that code. Please try again."}
           </p>
         ) : null}
       </form>
-      <p className="mt-3 text-sm text-muted-foreground">
+      <p className="mt-3 text-sm text-[var(--text-muted)]">
         Wrong address?{" "}
-        <Link to="/login" search={{ email, redirect: redirectTo }} className="text-primary underline">
+        <Link to="/login" search={{ email, redirect: redirectTo }} className="underline">
           Change email
         </Link>
       </p>

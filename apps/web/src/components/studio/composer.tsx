@@ -1,4 +1,4 @@
-import { ImagePlus, SlidersHorizontal, X } from "lucide-react";
+import { ImagePlus, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { blobToDataUrl } from "../../lib/format.ts";
 import { studio, useStudio } from "../../lib/store.ts";
@@ -13,12 +13,13 @@ interface Reference {
   name: string;
 }
 
-export function Composer({ seedBrief, onRun }: { seedBrief: { text: string; nonce: number }; onRun?: (id: string) => void }) {
+const MAX_REFERENCES = 4;
+
+export function Composer({ seedBrief, onStarted }: { seedBrief: { text: string; nonce: number }; onStarted?: () => void }) {
   const state = useStudio();
   const { settings, models } = state;
   const [brief, setBrief] = useState("");
-  const [reference, setReference] = useState<Reference | null>(null);
-  const [advanced, setAdvanced] = useState(false);
+  const [references, setReferences] = useState<Reference[]>([]);
   const [reading, setReading] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -31,27 +32,36 @@ export function Composer({ seedBrief, onRun }: { seedBrief: { text: string; nonc
 
   const rendererPool = settings.medium === "image" ? models.image : models.text;
   const promptModels = models.text;
-  const callCount =
-    Math.max(1, settings.mode === "compose" ? settings.promptModelIds.length : 1) * Math.max(1, settings.rendererIds.length) * Math.max(1, settings.variants);
+  const refining = settings.promptModelIds.length > 0;
+  const callCount = Math.max(1, refining ? settings.promptModelIds.length : 1) * Math.max(1, settings.rendererIds.length);
   const runningCount = Object.values(state.running).filter(Boolean).length;
   const keySet = settings.apiKey.trim().length > 0;
 
-  const setReferenceFile = async (file: File | undefined) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      studio.toast("A reference must be an image.", "error");
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      studio.toast("Reference images must be 10 MiB or smaller.", "error");
+  const addFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const room = MAX_REFERENCES - references.length;
+    if (room <= 0) {
+      studio.toast(`Up to ${MAX_REFERENCES} reference images.`, "info");
       return;
     }
     setReading(true);
     try {
-      const dataUrl = await blobToDataUrl(file);
-      setReference({ blob: file, dataUrl, mime: file.type || "image/png", name: file.name });
+      const next: Reference[] = [];
+      for (const file of [...files].slice(0, room)) {
+        if (!file.type.startsWith("image/")) {
+          studio.toast("References must be images.", "error");
+          continue;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          studio.toast("Reference images must be 10 MiB or smaller.", "error");
+          continue;
+        }
+        const dataUrl = await blobToDataUrl(file);
+        next.push({ blob: file, dataUrl, mime: file.type || "image/png", name: file.name });
+      }
+      if (next.length > 0) setReferences((current) => [...current, ...next]);
     } catch {
-      studio.toast("Could not read that image.", "error");
+      studio.toast("Could not read one of those images.", "error");
     } finally {
       setReading(false);
     }
@@ -60,7 +70,7 @@ export function Composer({ seedBrief, onRun }: { seedBrief: { text: string; nonc
   const handleRun = async () => {
     if (!keySet) {
       studio.openSettings();
-      studio.toast("Add your OpenRouter key to run this.", "error");
+      studio.toast("Add your OpenRouter key to generate.", "error");
       return;
     }
     if (brief.trim().length < 3) {
@@ -69,75 +79,48 @@ export function Composer({ seedBrief, onRun }: { seedBrief: { text: string; nonc
       return;
     }
     if (settings.rendererIds.length === 0) {
-      studio.toast(settings.medium === "image" ? "Choose an image model as the renderer." : "Choose a text model as the SVG renderer.", "error");
-      return;
-    }
-    if (settings.mode === "compose" && settings.promptModelIds.length === 0) {
-      studio.toast("Choose at least one prompt model.", "error");
+      studio.toast(settings.medium === "image" ? "Choose an image model." : "Choose an SVG model.", "error");
       return;
     }
 
-    const baseSeed = settings.seedMode === "fixed" ? Math.max(0, Math.min(2_147_483_647, Math.floor(settings.fixedSeed))) : Math.floor(Math.random() * 2_000_000_000);
     const id = await studio.startRun({
       brief,
-      mode: settings.mode,
       medium: settings.medium,
-      promptLlmIds: settings.mode === "compose" ? settings.promptModelIds : [],
+      promptLlmIds: refining ? settings.promptModelIds : [],
       rendererIds: settings.rendererIds,
       aspectRatio: settings.aspectRatio,
-      variants: settings.variants,
-      baseSeed,
-      reference: reference ? { blob: reference.blob, dataUrl: reference.dataUrl, mime: reference.mime } : null,
+      references: references.map(({ blob, dataUrl, mime }) => ({ blob, dataUrl, mime })),
     });
     if (id) {
-      onRun?.(id);
-      setReference(null);
+      setReferences([]);
+      onStarted?.();
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
-  const setMode = (mode: "compose" | "direct") => studio.updateSettings({ mode });
   const setMedium = (medium: Medium) => studio.setMedium(medium);
 
   return (
-    <section className="composer-dock" aria-label="Composer">
-      <div className="composer-top">
-        <div className="composer-mode">
-          <span className="eyebrow !text-[rgba(246,241,228,0.38)]">Method</span>
-          <div className="seg" role="group" aria-label="Method">
-            <button
-              type="button"
-              data-active={settings.mode === "compose"}
-              onClick={() => setMode("compose")}
-              title="Language models write the prompt, then a renderer draws it."
-            >
-              Compose
-            </button>
-            <button type="button" data-active={settings.mode === "direct"} onClick={() => setMode("direct")} title="Your brief goes straight to the renderers.">
-              Direct
-            </button>
+    <section className="composer-shell" aria-label="Composer">
+      <div className="composer-inner">
+        {references.length > 0 ? (
+          <div className="composer-refs" aria-label="Reference images">
+            {references.map((reference, index) => (
+              <div className="composer-ref" key={`${reference.name}-${index}`} title={reference.name}>
+                <img src={reference.dataUrl} alt="" />
+                <button type="button" onClick={() => setReferences((current) => current.filter((_, entry) => entry !== index))} aria-label={`Remove ${reference.name}`}>
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
+            <span className="composer-ref-note">
+              {references.length}/{MAX_REFERENCES} references
+            </span>
           </div>
-          <span className="composer-hint hidden md:inline">
-            {settings.mode === "compose" ? "LLMs map the brief → renderers draw it" : "your brief → every renderer, no rewrite"}
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
-          {runningCount > 0 ? <span className="run-status">{runningCount} running</span> : null}
-          <span className="composer-hint">
-            {callCount} {callCount === 1 ? "call" : "calls"} · {keySet ? "key in browser" : "no key"}
-          </span>
-        </div>
-      </div>
+        ) : null}
 
-      <div className="composer-body">
-        <div className="composer-prompt">
-          <div className="composer-label-row">
-            <label className="composer-label" htmlFor="brief">
-              Brief
-            </label>
-            <span className="composer-label hidden sm:inline">⌘ / Ctrl + Enter to run</span>
-          </div>
+        <div className="composer-prompt-row">
           <textarea
-            id="brief"
             ref={textarea}
             className="composer-textarea"
             value={brief}
@@ -148,72 +131,77 @@ export function Composer({ seedBrief, onRun }: { seedBrief: { text: string; nonc
                 void handleRun();
               }
             }}
-            placeholder="A brass observatory on a basalt cliff, dawn light, one impossible window…"
+            placeholder="Describe what you want to see."
             rows={2}
+            aria-label="Brief"
           />
+          <div className="composer-send">
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                void addFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className="composer-icon-button"
+              onClick={() => fileInput.current?.click()}
+              disabled={reading || references.length >= MAX_REFERENCES}
+              aria-label="Add a reference image"
+              title="Add a reference image"
+            >
+              <ImagePlus size={17} />
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary composer-run"
+              onClick={() => void handleRun()}
+              disabled={brief.trim().length < 3 || settings.rendererIds.length === 0}
+            >
+              Generate
+              <span className="composer-run-count">{callCount}</span>
+            </button>
+          </div>
         </div>
 
-        <div className="composer-side">
-          {reference ? (
-            <div className="reference-thumb" title={reference.name}>
-              <img src={reference.dataUrl} alt="Reference" />
-              <button type="button" onClick={() => setReference(null)} aria-label="Remove reference">
-                <X size={10} />
-              </button>
-            </div>
-          ) : null}
-          <input
-            ref={fileInput}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(event) => {
-              void setReferenceFile(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          <button type="button" className="reference-add" onClick={() => fileInput.current?.click()} disabled={reading}>
-            <ImagePlus size={13} />
-            {reading ? "Reading" : reference ? "Replace" : "Reference"}
+        <div className="composer-controls">
+          <button type="button" className="refine-toggle" data-active={refining} onClick={() => studio.setRefine(!refining)} aria-pressed={refining}>
+            <Sparkles size={13} />
+            Refine prompt
           </button>
-          <button type="button" className="run-button" onClick={() => void handleRun()} disabled={!keySet || brief.trim().length < 3}>
-            Run
-            <small>
-              {callCount} {callCount === 1 ? "call" : "calls"}
-            </small>
-          </button>
-        </div>
-      </div>
 
-      <div className="composer-controls">
-        {settings.mode === "compose" ? (
-          <div className="control-group">
-            <span className="control-label">Prompt</span>
+          {refining ? (
             <ModelPicker
-              label="MODELS"
+              label="Prompt models"
               models={promptModels}
               selectedIds={settings.promptModelIds}
               onToggle={studio.togglePromptModel}
               emptyLabel="Choose prompt models"
-              accent
+              onRefresh={() => void studio.refreshModels()}
+              align="left"
             />
-          </div>
-        ) : null}
+          ) : (
+            <span className="composer-hint">Prompt goes out as written.</span>
+          )}
 
-        <div className="control-group">
-          <span className="control-label">Renderers</span>
+          <span className="composer-spacer" />
+
           <ModelPicker
-            label="MODELS"
+            label={settings.medium === "image" ? "Image models" : "SVG models"}
             models={rendererPool}
             selectedIds={settings.rendererIds}
             onToggle={studio.toggleRenderer}
             emptyLabel={settings.medium === "image" ? "Choose image models" : "Choose SVG models"}
+            onRefresh={() => void studio.refreshModels()}
+            align="right"
           />
-        </div>
 
-        <div className="control-group">
-          <span className="control-label">Medium</span>
-          <div className="seg-mini" role="group" aria-label="Medium">
+          <div className="segmented" role="group" aria-label="Format">
             <button type="button" data-active={settings.medium === "image"} onClick={() => setMedium("image")}>
               Image
             </button>
@@ -221,11 +209,13 @@ export function Composer({ seedBrief, onRun }: { seedBrief: { text: string; nonc
               SVG
             </button>
           </div>
-        </div>
 
-        <div className="control-group">
-          <span className="control-label">Frame</span>
-          <select value={settings.aspectRatio} onChange={(event) => studio.updateSettings({ aspectRatio: event.target.value })} aria-label="Aspect ratio">
+          <select
+            className="select composer-select"
+            value={settings.aspectRatio}
+            onChange={(event) => studio.updateSettings({ aspectRatio: event.target.value })}
+            aria-label="Aspect ratio"
+          >
             {ASPECT_RATIOS.map((ratio) => (
               <option key={ratio} value={ratio}>
                 {ratio}
@@ -234,53 +224,25 @@ export function Composer({ seedBrief, onRun }: { seedBrief: { text: string; nonc
           </select>
         </div>
 
-        <div className="control-group">
-          <span className="control-label">Trials</span>
-          <div className="seg-mini" role="group" aria-label="Trials per model">
-            {[1, 2, 3].map((count) => (
-              <button key={count} type="button" data-active={settings.variants === count} onClick={() => studio.updateSettings({ variants: count })}>
-                {count}×
-              </button>
-            ))}
-          </div>
+        <div className="composer-foot">
+          <span>{callCount === 1 ? "1 output" : `${callCount} outputs`}</span>
+          <span className="dot" />
+          <span>{refining ? `${settings.promptModelIds.length} prompt ${settings.promptModelIds.length === 1 ? "model" : "models"}` : "no rewrite"}</span>
+          {runningCount > 0 ? (
+            <>
+              <span className="dot" />
+              <span>{runningCount} running</span>
+            </>
+          ) : null}
+          <span className="composer-spacer" />
+          {!keySet ? (
+            <button type="button" className="composer-key" onClick={studio.openSettings}>
+              Add key
+            </button>
+          ) : null}
+          <span className="composer-shortcut">⌘ Enter</span>
         </div>
-
-        <button type="button" className="composer-disclosure ml-auto" onClick={() => setAdvanced((value) => !value)} aria-expanded={advanced}>
-          <SlidersHorizontal size={11} className="mr-1 inline" />
-          {advanced ? "Hide advanced" : "Advanced"}
-        </button>
       </div>
-
-      {advanced ? (
-        <div className="composer-advanced">
-          <div className="control-group">
-            <span className="control-label">Seed</span>
-            <div className="seg-mini">
-              <button type="button" data-active={settings.seedMode === "random"} onClick={() => studio.updateSettings({ seedMode: "random" })}>
-                Random
-              </button>
-              <button type="button" data-active={settings.seedMode === "fixed"} onClick={() => studio.updateSettings({ seedMode: "fixed" })}>
-                Fixed
-              </button>
-            </div>
-            {settings.seedMode === "fixed" ? (
-              <input
-                type="number"
-                min={0}
-                max={2_147_483_647}
-                value={settings.fixedSeed}
-                onChange={(event) => studio.updateSettings({ fixedSeed: Number(event.target.value) || 0 })}
-                aria-label="Fixed seed"
-                className="w-[96px]"
-              />
-            ) : null}
-          </div>
-          <span className="control-label">
-            {settings.mode === "compose" ? "Each prompt model runs once; every renderer draws each prompt." : "Every renderer receives the same brief and base seed."}
-          </span>
-          <span className="control-label ml-auto">Cost is read from OpenRouter usage after each call.</span>
-        </div>
-      ) : null}
     </section>
   );
 }

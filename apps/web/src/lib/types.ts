@@ -1,14 +1,18 @@
 export type RunMode = "compose" | "direct";
 export type Medium = "image" | "svg";
-export type TrialStatus = "queued" | "composing" | "rendering" | "done" | "error" | "cancelled";
+export type ModelApi = "chat" | "images";
+export type OutputStatus = "queued" | "composing" | "rendering" | "done" | "error" | "cancelled";
 
 export interface ModelInfo {
   readonly id: string;
   readonly name: string;
-  readonly description: string;
-  readonly contextLength: number | null;
+  readonly created: number | null;
   readonly outputModalities: readonly string[];
   readonly inputModalities: readonly string[];
+  /** Chat Completions image models and Image API image models are separate lanes. */
+  readonly api?: ModelApi;
+  readonly supportsAspectRatio?: boolean;
+  readonly supportsReferences?: boolean;
 }
 
 export interface ModelState {
@@ -19,25 +23,19 @@ export interface ModelState {
   readonly fetchedAt: number | null;
 }
 
-export interface TrialRecord {
+export interface OutputRecord {
   id: string;
   creationId: string;
-  /** The model that wrote the prompt, or null when the brief is the prompt. */
   llmId: string | null;
   llmName: string | null;
-  /** The model that rendered the artifact. */
   modelId: string;
   modelName: string;
   medium: Medium;
   prompt: string;
-  /** "You" for a direct brief, otherwise the prompt model's name. */
   promptSource: string;
-  status: TrialStatus;
+  status: OutputStatus;
   error: string | null;
   assetId: string | null;
-  seed: number | null;
-  costUsd: number | null;
-  latencyMs: number | null;
   startedAt: string;
   finishedAt: string | null;
 }
@@ -58,68 +56,61 @@ export interface CreationRecord {
   promptLlmIds: string[];
   rendererIds: string[];
   aspectRatio: string;
-  variants: number;
-  baseSeed: number;
-  referenceAssetId: string | null;
-  /** One compose call per prompt model; kept separate from per-render cost. */
-  promptCostUsd: number;
-  trials: TrialRecord[];
+  referenceAssetIds: string[];
+  outputs: OutputRecord[];
   published: PublishedRef | null;
 }
 
 export interface AssetRecord {
   id: string;
   creationId: string;
-  trialId: string | null;
+  outputId: string | null;
   kind: "output" | "reference";
   mime: string;
   blob: Blob;
   width: number | null;
   height: number | null;
-  /** Present for SVG so copy works without reading the blob. */
   text: string | null;
 }
 
 export interface Settings {
   apiKey: string;
-  mode: RunMode;
   medium: Medium;
+  /** Empty means "use the brief as written"; one or more models refines it. */
   promptModelIds: string[];
   rendererIds: string[];
   aspectRatio: string;
-  variants: number;
-  seedMode: "random" | "fixed";
-  fixedSeed: number;
 }
 
 export interface Toast {
   id: string;
   message: string;
   tone: "info" | "error" | "success";
+  leaving: boolean;
+}
+
+export interface ReferenceInput {
+  blob: Blob;
+  dataUrl: string;
+  mime: string;
 }
 
 export interface RunRequest {
   brief: string;
-  mode: RunMode;
   medium: Medium;
+  /** Empty means "use the brief as written". */
   promptLlmIds: string[];
   rendererIds: string[];
   aspectRatio: string;
-  variants: number;
-  baseSeed: number;
-  reference: { blob: Blob; dataUrl: string; mime: string } | null;
+  references: ReferenceInput[];
 }
 
 export const ASPECT_RATIOS = ["1:1", "4:5", "3:4", "16:9", "9:16", "3:2"] as const;
 
 export const DEFAULT_SETTINGS: Settings = {
   apiKey: "",
-  mode: "compose",
   medium: "image",
   promptModelIds: [],
   rendererIds: [],
   aspectRatio: "1:1",
-  variants: 1,
-  seedMode: "random",
-  fixedSeed: 42,
 };

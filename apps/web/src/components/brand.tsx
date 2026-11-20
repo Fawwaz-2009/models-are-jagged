@@ -1,6 +1,6 @@
 import { getRouteApi, Link } from "@tanstack/react-router";
+import { ArrowUpRight, Compass, Images, Settings2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { Settings2 } from "lucide-react";
 
 const rootRoute = getRouteApi("__root__");
 
@@ -14,13 +14,13 @@ export function JaggedMark({ className = "" }: { className?: string }) {
   );
 }
 
-export function Wordmark({ appName, sub = "a comparison studio" }: { appName: string; sub?: string }) {
+export function Wordmark({ appName, sub = "studio" }: { appName: string; sub?: string }) {
   return (
     <>
       <span className="brand-mark">
         <JaggedMark />
       </span>
-      <span className="min-w-0">
+      <span className="brand-copy">
         <span className="brand-name">{appName}</span>
         <span className="brand-sub">{sub}</span>
       </span>
@@ -28,87 +28,67 @@ export function Wordmark({ appName, sub = "a comparison studio" }: { appName: st
   );
 }
 
-export interface HeaderProps {
-  appName: string;
-  active: "gallery" | "explore" | "catalog" | "profile";
-  appOrigin?: string;
-  publicMode?: boolean;
-  keySet?: boolean;
+interface AppShellProps {
+  active: "gallery" | "explore";
+  children: ReactNode;
+  dock?: boolean;
   onSettings?: () => void;
-  actions?: ReactNode;
+  keySet?: boolean;
 }
 
-export function SiteHeader({ appName, active, appOrigin, publicMode = false, keySet = false, onSettings, actions }: HeaderProps) {
-  const studioHref = publicMode ? appOrigin || "/" : "/";
-  const exploreHref = publicMode ? "/" : "/explore";
+/**
+ * No side rail. The page is the asset grid. Two small floating clusters keep
+ * navigation and settings reachable without taking any room from the work.
+ */
+export function AppShell({ active, children, dock = false, onSettings, keySet = false }: AppShellProps) {
+  const meta = useAppMeta();
+  const app = !meta.publicMode;
 
   return (
-    <header className="site-header">
-      <a className="brand" href={publicMode ? "/" : "/"}>
-        <Wordmark appName={appName} sub={publicMode ? "the public catalog" : "a comparison studio"} />
-      </a>
-
-      <nav className="header-nav" aria-label="Primary">
-        {publicMode ? (
-          <>
-            <a className="nav-tab" data-active={active === "catalog" || active === "profile"} href="/">
-              Catalog
-            </a>
-            {studioHref ? (
-              <a className="nav-tab" href={studioHref}>
-                Studio <span aria-hidden="true">↗</span>
-              </a>
-            ) : null}
-          </>
+    <div className="app">
+      <div className="topbar">
+        {app ? (
+          <Link className="topbar-brand" to="/" title={meta.appName} aria-label={`${meta.appName}, gallery`}>
+            <JaggedMark />
+          </Link>
         ) : (
-          <>
-            <Link className="nav-tab" data-active={active === "gallery"} to="/">
-              Gallery
-            </Link>
-            <a className="nav-tab" data-active={active === "explore"} href={exploreHref}>
-              Explore
-            </a>
-          </>
+          <a className="topbar-brand" href="/" title={meta.appName} aria-label={`${meta.appName}, gallery`}>
+            <JaggedMark />
+          </a>
         )}
-      </nav>
 
-      <div className="header-actions">
-        {actions}
-        {!publicMode && onSettings ? (
-          <>
-            <span className="key-state" title={keySet ? "OpenRouter key is stored in this browser" : "No OpenRouter key yet"}>
-              <span className="key-dot" data-set={keySet} />
-              <span>{keySet ? "Key set" : "Key missing"}</span>
-            </span>
-            <button type="button" className="icon-btn" onClick={onSettings} aria-label="Open settings" title="Settings">
-              <Settings2 size={15} />
-            </button>
-          </>
-        ) : null}
+        <nav className="topbar-actions" aria-label="Primary">
+          {app ? (
+            <>
+              <Link className="topbar-button" data-active={active === "gallery"} to="/" title="Gallery" aria-label="Gallery">
+                <Images size={16} />
+              </Link>
+              <Link className="topbar-button" data-active={active === "explore"} to="/explore" title="Explore" aria-label="Explore">
+                <Compass size={16} />
+              </Link>
+              {onSettings ? (
+                <button type="button" className="topbar-button" onClick={onSettings} title="Settings" aria-label="Settings">
+                  <Settings2 size={16} />
+                  {keySet ? <span className="topbar-key" aria-hidden="true" /> : null}
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <a className="topbar-button" data-active="true" href="/" title="Gallery" aria-label="Gallery">
+                <Images size={16} />
+              </a>
+              {meta.appOrigin ? (
+                <a className="topbar-button" href={meta.appOrigin} title="Open the studio" aria-label="Open the studio">
+                  <ArrowUpRight size={16} />
+                </a>
+              ) : null}
+            </>
+          )}
+        </nav>
       </div>
-    </header>
-  );
-}
 
-export function PublicFooter({ catalogHref, appOrigin }: { catalogHref: string; appOrigin: string }) {
-  return (
-    <footer className="border-t border-[var(--line)] px-6 py-8">
-      <div className="mx-auto flex max-w-[1560px] flex-wrap items-center justify-between gap-4">
-        <span className="eyebrow">Models are jagged · every output carries its provenance</span>
-        <div className="flex flex-wrap items-center gap-4 font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--muted)]">
-          <a className="hover:text-[var(--orange)]" href={catalogHref}>
-            Catalog
-          </a>
-          {appOrigin ? (
-            <a className="hover:text-[var(--orange)]" href={appOrigin}>
-              Open studio
-            </a>
-          ) : null}
-          <a className="hover:text-[var(--orange)]" href="https://openrouter.ai" target="_blank" rel="noreferrer">
-            OpenRouter
-          </a>
-        </div>
-      </div>
-    </footer>
+      <main className={dock ? "app-main app-main-docked" : "app-main"}>{children}</main>
+    </div>
   );
 }

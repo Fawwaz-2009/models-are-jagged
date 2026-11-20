@@ -56,8 +56,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
               { name: "twitter:image", content: `${url}/og.png` },
             ]
           : [{ name: "twitter:card", content: "summary" }]),
-        { name: "theme-color", media: "(prefers-color-scheme: light)", content: "#ffffff" },
-        { name: "theme-color", media: "(prefers-color-scheme: dark)", content: "#09090b" },
+        { name: "theme-color", content: "#fbfbfa" },
       ],
       // The font is discovered only after the stylesheet parses, which leaves the
       // first paint in a fallback face. Preloading races it with the CSS instead.
@@ -101,7 +100,7 @@ function Document({ children }: Readonly<{ children: ReactNode }>) {
       <head>
         <HeadContent />
       </head>
-      <body className="bg-[var(--paper)] font-sans text-[var(--ink)] antialiased">
+      <body className="bg-[var(--bg)] font-sans text-[var(--text)] antialiased">
         {children}
         <Scripts />
       </body>

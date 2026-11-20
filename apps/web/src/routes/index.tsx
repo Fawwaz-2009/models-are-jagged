@@ -14,6 +14,6 @@ function Home() {
   const meta = useAppMeta();
   const { publish } = Route.useSearch();
 
-  if (meta.publicMode) return <PublicCatalogPage mode="catalog" />;
+  if (meta.publicMode) return <PublicCatalogPage />;
   return <Studio initialPublishId={publish} />;
 }

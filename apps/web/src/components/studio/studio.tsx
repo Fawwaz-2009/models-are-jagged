@@ -1,18 +1,19 @@
+import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { authClient } from "../../auth-client.ts";
-import { SiteHeader, useAppMeta } from "../brand.tsx";
-import { CompareScreen } from "./compare.tsx";
+import { AppShell, useAppMeta } from "../brand.tsx";
+import { CatalogSurface } from "../public/public-catalog.tsx";
 import { Composer } from "./composer.tsx";
-import { DetailSheet } from "./detail-sheet.tsx";
+import { DetailSheet, CompareScreen } from "./detail-sheet.tsx";
 import { Gallery } from "./gallery.tsx";
 import { PublishDialog } from "./publish-dialog.tsx";
 import { SettingsDialog } from "./settings-dialog.tsx";
 import { studio, useStudio } from "../../lib/store.ts";
 import type { CreationRecord } from "../../lib/types.ts";
 
-export function Studio({ initialPublishId }: { initialPublishId?: string }) {
+export function Studio({ view = "gallery", initialPublishId }: { view?: "gallery" | "explore"; initialPublishId?: string }) {
   const state = useStudio();
   const meta = useAppMeta();
+  const navigate = useNavigate();
   const [seedBrief, setSeedBrief] = useState({ text: "", nonce: 0 });
 
   useEffect(() => {
@@ -34,88 +35,44 @@ export function Studio({ initialPublishId }: { initialPublishId?: string }) {
 
   const rerun = (creation: CreationRecord) => {
     studio.updateSettings({
-      mode: creation.mode,
       medium: creation.medium,
       promptModelIds: creation.promptLlmIds,
       rendererIds: creation.rendererIds,
       aspectRatio: creation.aspectRatio,
-      variants: creation.variants,
     });
     setSeedBrief({ text: creation.brief, nonce: Date.now() });
     studio.closeDetail();
-    studio.toast("The run's setup is in the composer.", "success");
+    studio.toast("The setup is back in the composer.", "success");
   };
 
   return (
-    <div className="min-h-svh">
-      <SiteHeader
-        appName={meta.appName}
-        active="gallery"
-        appOrigin={meta.appOrigin}
-        keySet={state.settings.apiKey.trim().length > 0}
-        onSettings={studio.openSettings}
-        actions={<HeaderAccount />}
+    <AppShell active={view} dock keySet={state.settings.apiKey.trim().length > 0} onSettings={studio.openSettings}>
+      {!state.ready ? (
+        <div className="asset-grid">
+          {Array.from({ length: 12 }, (_, index) => (
+            <div className="asset-tile" key={index}>
+              <div className="asset-tile-loading" />
+            </div>
+          ))}
+        </div>
+      ) : view === "gallery" ? (
+        <Gallery state={state} onSuggest={suggest} />
+      ) : (
+        <CatalogSurface publicOrigin={meta.publicOrigin} />
+      )}
+
+      <Composer
+        seedBrief={seedBrief}
+        onStarted={() => {
+          if (view === "explore") navigate({ to: "/" });
+        }}
       />
-
-      <main className="studio-main">
-        {!state.ready ? (
-          <div>
-            <div className="studio-intro">
-              <div>
-                <div className="skeleton h-3 w-32" />
-                <div className="skeleton mt-4 h-16 w-[min(520px,80vw)]" />
-              </div>
-              <div className="skeleton h-12 w-[min(320px,60vw)]" />
-            </div>
-            <div className="run-grid">
-              {Array.from({ length: 3 }, (_, index) => (
-                <div className="run-card" key={index}>
-                  <div className="skeleton aspect-square" />
-                  <div className="run-body">
-                    <div className="skeleton h-5 w-4/5" />
-                    <div className="skeleton mt-3 h-3 w-2/5" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <Gallery state={state} onSuggest={suggest} />
-        )}
-      </main>
-
-      <Composer seedBrief={seedBrief} />
       <DetailSheet state={state} onRerun={rerun} />
       <CompareScreen state={state} />
       <SettingsDialog />
-      <PublishDialog publicOrigin={meta.publicOrigin} />
+      <PublishDialog />
       <Toaster />
-    </div>
-  );
-}
-
-function HeaderAccount() {
-  const [user, setUser] = useState<{ email: string } | null>(null);
-
-  useEffect(() => {
-    void authClient
-      .getSession()
-      .then((response) => setUser(response.data?.user ? { email: response.data.user.email } : null))
-      .catch(() => setUser(null));
-  }, []);
-
-  if (!user) {
-    return (
-      <a className="btn btn-small hidden sm:inline-flex" href={`/login?redirect=${encodeURIComponent("/")}`}>
-        Sign in
-      </a>
-    );
-  }
-
-  return (
-    <button type="button" className="btn btn-small hidden max-w-[180px] sm:inline-flex" onClick={studio.openSettings} title={user.email}>
-      <span className="truncate">{user.email.split("@")[0]}</span>
-    </button>
+    </AppShell>
   );
 }
 

@@ -12,20 +12,6 @@ export const blobToBase64 = async (blob: Blob): Promise<string> => {
   return comma === -1 ? "" : url.slice(comma + 1);
 };
 
-export const formatCost = (cost: number | null): string => {
-  if (cost === null || !Number.isFinite(cost)) return "cost n/a";
-  if (cost === 0) return "$0";
-  if (cost < 0.001) return `$${cost.toFixed(5)}`;
-  if (cost < 0.1) return `$${cost.toFixed(3)}`;
-  return `$${cost.toFixed(2)}`;
-};
-
-export const formatLatency = (ms: number | null): string => {
-  if (ms === null || !Number.isFinite(ms)) return "latency n/a";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-};
-
 export const formatDate = (iso: string): string =>
   new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
 

@@ -1,4 +1,4 @@
-import type { ModelInfo } from "./types.ts";
+import type { ModelApi, ModelInfo } from "./types.ts";
 
 const BASE = "https://openrouter.ai/api/v1";
 
@@ -21,16 +21,36 @@ interface ChatResponse {
       images?: Array<{ type?: string; image_url?: { url?: string } | string; url?: string }>;
     };
   }>;
-  usage?: { cost?: number; total_cost?: number };
 }
 
 interface ModelsResponse {
   data?: Array<{
     id?: string;
     name?: string;
-    description?: string;
-    context_length?: number;
+    created?: number;
     architecture?: { input_modalities?: string[]; output_modalities?: string[] };
+  }>;
+}
+
+interface ImageModelsResponse {
+  data?: Array<{
+    id?: string;
+    name?: string;
+    created?: number;
+    architecture?: { input_modalities?: string[]; output_modalities?: string[] };
+    supported_parameters?: {
+      aspect_ratio?: unknown;
+      input_references?: unknown;
+      output_format?: unknown;
+    };
+  }>;
+}
+
+interface ImagesResponse {
+  data?: Array<{
+    b64_json?: string;
+    media_type?: string;
+    url?: string;
   }>;
 }
 
@@ -63,44 +83,81 @@ const contentText = (content: ChatMessageView["content"] | undefined): string =>
 
 const extractError = (error: unknown): string => (error instanceof Error ? error.message : "Something went wrong talking to OpenRouter.");
 
+const orderModels = (models: ModelInfo[]): ModelInfo[] =>
+  models.sort((a, b) => {
+    const created = (b.created ?? 0) - (a.created ?? 0);
+    return created !== 0 ? created : a.name.localeCompare(b.name);
+  });
+
 export const fetchModels = async (signal?: AbortSignal): Promise<ModelInfo[]> => {
-  const response = await request("/models", {
+  const chatRequest = request("/models", {
     method: "GET",
     signal,
-  });
-  const body = (await response.json()) as ModelsResponse;
-  const models = (body.data ?? [])
+  }).then(async (response) => (await response.json()) as ModelsResponse);
+  const imageRequest = request("/images/models", {
+    method: "GET",
+    signal,
+  })
+    .then(async (response) => (await response.json()) as ImageModelsResponse)
+    .catch(() => ({ data: [] }) as ImageModelsResponse);
+  const [chatBody, imageBody] = await Promise.all([chatRequest, imageRequest]);
+
+  const chatModels: ModelInfo[] = (chatBody.data ?? [])
     .filter((model): model is NonNullable<ModelsResponse["data"]>[number] & { id: string } => typeof model.id === "string")
     .filter((model) => !model.id.includes(":batch") && !model.id.startsWith("openrouter/"))
     .map((model) => ({
       id: model.id,
       name: model.name?.trim() || model.id,
-      description: model.description?.trim() || "",
-      contextLength: typeof model.context_length === "number" ? model.context_length : null,
+      created: typeof model.created === "number" ? model.created : null,
       outputModalities: model.architecture?.output_modalities ?? [],
       inputModalities: model.architecture?.input_modalities ?? [],
+      api: "chat" as const,
     }))
     .filter((model) => model.outputModalities.includes("text") || model.outputModalities.includes("image"));
 
+  const imageModels: ModelInfo[] = (imageBody.data ?? [])
+    .filter((model): model is NonNullable<ImageModelsResponse["data"]>[number] & { id: string } => typeof model.id === "string")
+    .filter((model) => !model.id.includes(":batch") && !model.id.startsWith("openrouter/"))
+    .map((model) => ({
+      id: model.id,
+      name: model.name?.trim() || model.id,
+      created: typeof model.created === "number" ? model.created : null,
+      outputModalities: model.architecture?.output_modalities ?? ["image"],
+      inputModalities: model.architecture?.input_modalities ?? ["text"],
+      api: "images" as const,
+      supportsAspectRatio: model.supported_parameters?.aspect_ratio !== undefined,
+      supportsReferences: model.supported_parameters?.input_references !== undefined,
+    }))
+    .filter((model) => model.outputModalities.includes("image"));
+
+  const merged = new Map<string, ModelInfo>();
+  for (const model of chatModels) merged.set(model.id, model);
+  for (const model of imageModels) {
+    if (!merged.has(model.id)) merged.set(model.id, model);
+  }
+  const models = [...merged.values()];
   if (models.length === 0) throw new Error("OpenRouter returned no usable models.");
-  return models.sort((a, b) => a.name.localeCompare(b.name));
+  return orderModels(models);
+};
+
+const withReferences = (text: string, referenceDataUrls: readonly string[], note: string): string | ContentPart[] => {
+  if (referenceDataUrls.length === 0) return text;
+  return [{ type: "text", text }, { type: "text", text: note }, ...referenceDataUrls.map((url) => ({ type: "image_url" as const, image_url: { url } }))];
 };
 
 export const composePrompt = async (options: {
   apiKey: string;
   model: string;
   brief: string;
-  referenceDataUrl: string | null;
+  referenceDataUrls: readonly string[];
   signal: AbortSignal;
-}): Promise<{ prompt: string; costUsd: number | null }> => {
-  const userText = `Brief:\n${options.brief}\n\nWrite the prompt now.`;
-  const content: string | ContentPart[] = options.referenceDataUrl
-    ? [
-        { type: "text", text: userText },
-        { type: "text", text: "The reference image below is the visual direction. Translate its subject, palette, and composition into words." },
-        { type: "image_url", image_url: { url: options.referenceDataUrl } },
-      ]
-    : userText;
+}): Promise<{ prompt: string }> => {
+  const text = `Brief:\n${options.brief}\n\nWrite the prompt now.`;
+  const content = withReferences(
+    text,
+    options.referenceDataUrls,
+    "The reference images below are the visual direction. Use their subject, palette, composition, and texture. Translate what matters into words.",
+  );
 
   const response = await request("/chat/completions", {
     method: "POST",
@@ -124,8 +181,7 @@ export const composePrompt = async (options: {
   const body = (await response.json()) as ChatResponse;
   const prompt = contentText(body.choices?.[0]?.message?.content).trim();
   if (!prompt) throw new Error("The prompt model returned an empty prompt.");
-  const cost = body.usage?.cost ?? body.usage?.total_cost ?? null;
-  return { prompt: prompt.replace(/^["'`]+|["'`]+$/g, "").trim(), costUsd: typeof cost === "number" ? cost : null };
+  return { prompt: prompt.replace(/^["'`]+|["'`]+$/g, "").trim() };
 };
 
 const extractImageUrl = (body: ChatResponse): string | null => {
@@ -137,8 +193,7 @@ const extractImageUrl = (body: ChatResponse): string | null => {
     if (typeof image.url === "string" && image.url.length > 0) return image.url;
   }
   const text = contentText(message?.content);
-  const dataUrl = /https?:\/\/[^\s)"']+|data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+/i.exec(text)?.[0];
-  return dataUrl ?? null;
+  return /https?:\/\/[^\s)"']+|data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+/i.exec(text)?.[0] ?? null;
 };
 
 const mimeFromDataUrl = (url: string, fallback: string): string => {
@@ -170,10 +225,7 @@ const blobFromUrl = async (url: string, fallbackMime: string): Promise<{ blob: B
   if (url.startsWith("data:")) {
     const mime = mimeFromDataUrl(url, fallbackMime);
     const payload = url.slice(url.indexOf(",") + 1);
-    const binary = atob(payload);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
-    return { blob: new Blob([bytes], { type: mime }), mime };
+    return { blob: blobFromBase64(payload, mime), mime };
   }
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Could not download the generated image (${response.status}).`);
@@ -181,21 +233,62 @@ const blobFromUrl = async (url: string, fallbackMime: string): Promise<{ blob: B
   return { blob: await response.blob(), mime };
 };
 
+const blobFromBase64 = (payload: string, mime: string): Blob => {
+  const binary = atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mime });
+};
+
 export const generateImage = async (options: {
   apiKey: string;
   model: string;
+  api?: ModelApi;
+  supportsAspectRatio?: boolean;
+  supportsReferences?: boolean;
   prompt: string;
-  referenceDataUrl: string | null;
+  referenceDataUrls: readonly string[];
   aspectRatio: string;
-  seed: number;
   signal: AbortSignal;
-}): Promise<{ blob: Blob; mime: string; width: number | null; height: number | null; costUsd: number | null }> => {
-  const content: string | ContentPart[] = options.referenceDataUrl
-    ? [
-        { type: "text", text: options.prompt },
-        { type: "image_url", image_url: { url: options.referenceDataUrl } },
-      ]
-    : options.prompt;
+}): Promise<{ blob: Blob; mime: string; width: number | null; height: number | null }> => {
+  if (options.api === "images") {
+    const body: Record<string, unknown> = { model: options.model, prompt: options.prompt };
+    if (options.supportsAspectRatio) body.aspect_ratio = options.aspectRatio;
+    if (options.supportsReferences && options.referenceDataUrls.length > 0) {
+      body.input_references = options.referenceDataUrls.map((url) => ({ type: "image_url", image_url: { url } }));
+    }
+
+    const response = await request("/images", {
+      method: "POST",
+      headers: authHeaders(options.apiKey),
+      signal: options.signal,
+      body: JSON.stringify(body),
+    });
+    const payload = (await response.json()) as ImagesResponse;
+    const first = payload.data?.[0];
+    if (!first) throw new Error("The model did not return an image.");
+
+    let blob: Blob;
+    let mime: string;
+    if (typeof first.b64_json === "string" && first.b64_json.length > 0) {
+      mime = first.media_type ?? "image/png";
+      blob = blobFromBase64(first.b64_json, mime);
+    } else if (typeof first.url === "string" && first.url.length > 0) {
+      const downloaded = await blobFromUrl(first.url, first.media_type ?? "image/png");
+      blob = downloaded.blob;
+      mime = downloaded.mime;
+    } else {
+      throw new Error("The model did not return image bytes.");
+    }
+    const size = await imageDimensions(blob, mime);
+    return { blob, mime, ...size };
+  }
+
+  const content = withReferences(
+    options.prompt,
+    options.referenceDataUrls,
+    "Use the reference images as visual direction while keeping the written prompt authoritative.",
+  );
 
   const response = await request("/chat/completions", {
     method: "POST",
@@ -205,7 +298,6 @@ export const generateImage = async (options: {
       model: options.model,
       modalities: ["image", "text"],
       image_config: { aspect_ratio: options.aspectRatio },
-      seed: options.seed,
       messages: [
         { role: "system", content: "Render the user's prompt faithfully. Honor every constraint and produce the image directly." },
         { role: "user", content },
@@ -218,24 +310,17 @@ export const generateImage = async (options: {
   if (!url) throw new Error("The model did not return an image.");
   const { blob, mime } = await blobFromUrl(url, "image/png");
   const size = await imageDimensions(blob, mime);
-  const cost = body.usage?.cost ?? body.usage?.total_cost ?? null;
-  return { blob, mime, ...size, costUsd: typeof cost === "number" ? cost : null };
+  return { blob, mime, ...size };
 };
 
 export const generateSvg = async (options: {
   apiKey: string;
   model: string;
   prompt: string;
-  referenceDataUrl: string | null;
-  seed: number;
+  referenceDataUrls: readonly string[];
   signal: AbortSignal;
-}): Promise<{ blob: Blob; mime: string; width: number | null; height: number | null; text: string; costUsd: number | null }> => {
-  const content: string | ContentPart[] = options.referenceDataUrl
-    ? [
-        { type: "text", text: options.prompt },
-        { type: "image_url", image_url: { url: options.referenceDataUrl } },
-      ]
-    : options.prompt;
+}): Promise<{ blob: Blob; mime: string; width: number | null; height: number | null; text: string }> => {
+  const content = withReferences(options.prompt, options.referenceDataUrls, "Use the reference images for subject, palette, and composition.");
 
   const response = await request("/chat/completions", {
     method: "POST",
@@ -245,7 +330,6 @@ export const generateSvg = async (options: {
       model: options.model,
       temperature: 0.7,
       max_tokens: 8000,
-      seed: options.seed,
       messages: [
         {
           role: "system",
@@ -264,8 +348,7 @@ export const generateSvg = async (options: {
   const svg = match[0];
   const size = dimsFromSvg(svg);
   const blob = new Blob([svg], { type: "image/svg+xml" });
-  const cost = body.usage?.cost ?? body.usage?.total_cost ?? null;
-  return { blob, mime: "image/svg+xml", ...size, text: svg, costUsd: typeof cost === "number" ? cost : null };
+  return { blob, mime: "image/svg+xml", ...size, text: svg };
 };
 
 export { extractError as openRouterErrorMessage };

@@ -4,9 +4,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 import { useForm } from "react-hook-form";
 import { authClient } from "../../auth-client.ts";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { AuthCard } from "./-components/auth-card";
 
 export const Route = createFileRoute("/login/")({
@@ -17,13 +14,6 @@ export const Route = createFileRoute("/login/")({
   component: Login,
 });
 
-/**
- * The same form pattern as every form in the app: react-hook-form + an
- * Effect Schema (Standard Schema resolver) for instant field validation,
- * useMutation for the async call, one alert for server errors. The only
- * per-form difference is the client a mutation calls: product routes use
- * the contract-derived client, auth uses better-auth's.
- */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const emailFormSchema = Schema.toStandardSchemaV1(
   Schema.Struct({
@@ -54,12 +44,15 @@ function Login() {
   });
 
   return (
-    <AuthCard title="Sign in to publish" description="Passwordless: the first sign-in with any email creates the account.">
+    <AuthCard title="Sign in to publish" description="Passwordless. The first sign-in with any email creates the account.">
       <form onSubmit={emailForm.handleSubmit((values) => sendCode.mutate(values))} className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="email">Email</Label>
-          <Input
+        <div className="field">
+          <label className="field-label" htmlFor="email">
+            Email
+          </label>
+          <input
             id="email"
+            className="input"
             type="email"
             autoComplete="email"
             placeholder="you@example.com"
@@ -67,16 +60,16 @@ function Login() {
             aria-invalid={Boolean(emailForm.formState.errors.email)}
           />
           {emailForm.formState.errors.email ? (
-            <p className="text-sm text-destructive" role="alert">
+            <p className="field-error" role="alert">
               {emailForm.formState.errors.email.message}
             </p>
           ) : null}
         </div>
-        <Button type="submit" disabled={sendCode.isPending} className="w-full">
-          {sendCode.isPending ? "Sending..." : "Send a code"}
-        </Button>
+        <button type="submit" disabled={sendCode.isPending} className="btn btn-primary w-full">
+          {sendCode.isPending ? "Sending" : "Send a code"}
+        </button>
         {sendCode.isError ? (
-          <p className="text-sm text-destructive" role="alert">
+          <p className="field-error" role="alert">
             {sendCode.error instanceof Error ? sendCode.error.message : "We could not send a sign-in code. Please try again."}
           </p>
         ) : null}

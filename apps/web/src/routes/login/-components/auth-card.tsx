@@ -6,19 +6,18 @@ export function AuthCard({ title, description, children }: { title: string; desc
   const meta = useAppMeta();
 
   return (
-    <main className="mx-auto flex min-h-svh max-w-md flex-col justify-center px-6 py-16">
-      <a className="brand mb-8 self-start" href="/">
-        <Wordmark appName={meta.appName} sub="sign in to publish" />
-      </a>
-      <div className="border border-[var(--line)] bg-[var(--card)] p-6 shadow-[6px_6px_0_var(--ink)] sm:p-8">
-        <span className="eyebrow">Passwordless / email</span>
-        <h1 className="display mt-2 text-4xl leading-[0.95]">{title}</h1>
-        <p className="mt-3 text-sm leading-relaxed text-[var(--muted)]">{description}</p>
-        <div className="mt-6">{children}</div>
+    <main className="auth-page">
+      <div className="auth-wrap">
+        <a className="brand auth-brand" href="/">
+          <Wordmark appName={meta.appName} sub="publish" />
+        </a>
+        <div className="auth-panel">
+          <h1 className="auth-title">{title}</h1>
+          <p className="auth-description">{description}</p>
+          <div className="auth-form">{children}</div>
+        </div>
+        <p className="auth-note">Publishing needs an account so you can remove a snapshot later. The studio and your key never require one.</p>
       </div>
-      <p className="mt-6 max-w-[38ch] font-mono text-[9px] uppercase leading-relaxed tracking-[0.12em] text-[var(--muted)]">
-        Why an account? Only public snapshots need an owner. The studio itself never asks.
-      </p>
     </main>
   );
 }

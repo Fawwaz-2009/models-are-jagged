@@ -1,179 +1,160 @@
-import { ExternalLink, Eye, EyeOff, LogOut, RefreshCw, X } from "lucide-react";
+import { ArrowUpRight, Eye, EyeOff, LogOut, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "../../auth-client.ts";
 import { formatDate } from "../../lib/format.ts";
 import { studio, useStudio } from "../../lib/store.ts";
+import { Modal } from "../modal.tsx";
 
 export function SettingsDialog() {
   const state = useStudio();
   const [key, setKey] = useState(state.settings.apiKey);
   const [visible, setVisible] = useState(false);
-  const [user, setUser] = useState<{ email: string; name: string } | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!state.settingsOpen) return;
     setKey(state.settings.apiKey);
     setConfirmClear(false);
-    document.body.style.overflow = "hidden";
     void authClient
       .getSession()
-      .then((response) => setUser(response.data?.user ? { email: response.data.user.email, name: response.data.user.name ?? response.data.user.email } : null))
-      .catch(() => setUser(null));
-    return () => {
-      document.body.style.overflow = "";
-    };
+      .then((response) => setSignedIn(Boolean(response.data?.user)))
+      .catch(() => setSignedIn(false));
   }, [state.settingsOpen, state.settings.apiKey]);
 
-  useEffect(() => {
-    if (!state.settingsOpen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") studio.closeSettings();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [state.settingsOpen]);
-
-  if (!state.settingsOpen) return null;
-
-  const saveKey = () => {
+  const save = () => {
     studio.updateSettings({ apiKey: key.trim() });
-    studio.toast("OpenRouter key saved in this browser.", "success");
+    studio.toast("Key saved in this browser.", "success");
   };
 
-  const signOut = async () => {
-    await authClient.signOut();
-    window.location.reload();
-  };
-
-  const clear = () => {
-    if (!confirmClear) {
-      setConfirmClear(true);
-      return;
-    }
-    studio.clearGallery();
-    studio.toast("Local gallery cleared. Your key and settings stay.", "success");
-    setConfirmClear(false);
-  };
+  const modelCount = state.models.text.length + state.models.image.length;
+  const updated = state.models.fetchedAt ? formatDate(new Date(state.models.fetchedAt).toISOString()) : "built-in fallback";
 
   return (
-    <div
-      className="modal-backdrop"
-      role="presentation"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) studio.closeSettings();
-      }}
-    >
-      <section className="modal" role="dialog" aria-modal="true" aria-label="Settings">
-        <header className="modal-head">
-          <div>
-            <span className="eyebrow">Local configuration</span>
-            <h2>Settings</h2>
-          </div>
-          <button type="button" className="icon-btn" onClick={studio.closeSettings} aria-label="Close settings">
-            <X size={16} />
-          </button>
-        </header>
+    <Modal open={state.settingsOpen} onClose={studio.closeSettings} label="Settings" size="md" className="settings-modal">
+      <div className="modal-head">
+        <div>
+          <h2 className="modal-title">Settings</h2>
+          <p className="modal-description">Your key and files stay in this browser. Only published snapshots leave it.</p>
+        </div>
+      </div>
 
-        <div className="modal-body">
-          <div className="form-row">
-            <label htmlFor="api-key" className="eyebrow">
-              OpenRouter API key
-            </label>
-            <div className="key-input-row">
-              <div className="relative flex-1">
-                <input
-                  id="api-key"
-                  className="text-input pr-10"
-                  type={visible ? "text" : "password"}
-                  value={key}
-                  onChange={(event) => setKey(event.target.value)}
-                  placeholder="sk-or-v1-…"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted)] hover:text-[var(--ink)]"
-                  onClick={() => setVisible((value) => !value)}
-                  aria-label={visible ? "Hide API key" : "Show API key"}
-                >
-                  {visible ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-              <button type="button" className="btn btn-accent" onClick={saveKey}>
-                Save
-              </button>
-            </div>
-            <p className="form-help">
-              Stored in localStorage on this origin. Sent only to openrouter.ai. Never included in a publication.{" "}
-              <a className="underline" href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">
-                Create a key <ExternalLink size={10} className="inline" />
-              </a>
-            </p>
+      <div className="modal-body settings-body">
+        <section className="settings-section">
+          <div className="settings-section-head">
+            <span className="field-label">OpenRouter key</span>
+            <a className="settings-link" href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">
+              Get a key <ArrowUpRight size={11} />
+            </a>
           </div>
-
-          <div className="form-row">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <span className="eyebrow">Model list</span>
-                <div className="model-counts">
-                  <span className="chip">{state.models.text.length} text</span>
-                  <span className="chip">{state.models.image.length} image</span>
-                  {state.models.fetchedAt ? <span className="chip">updated {formatDate(new Date(state.models.fetchedAt).toISOString())}</span> : null}
-                </div>
-              </div>
-              <button type="button" className="btn btn-small" onClick={() => void studio.refreshModels()} disabled={state.models.loading}>
-                <RefreshCw size={12} className={state.models.loading ? "animate-spin" : ""} /> Refresh
-              </button>
-            </div>
-            {state.models.error ? (
-              <p className="form-error">Could not refresh the live list: {state.models.error}. The built-in starter list is still selectable.</p>
-            ) : null}
-          </div>
-
-          <div className="form-row">
-            <span className="eyebrow">Account</span>
-            <div className="account-row mt-2">
-              {user ? (
-                <>
-                  <div className="who">
-                    <strong>{user.name}</strong>
-                    <br />
-                    <span className="text-[var(--muted)]">{user.email}</span>
-                  </div>
-                  <button type="button" className="btn btn-small" onClick={() => void signOut()}>
-                    <LogOut size={12} /> Sign out
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="who">Not signed in. Publishing needs an email account.</div>
-                  <a className="btn btn-small" href={`/login?redirect=${encodeURIComponent("/")}`}>
-                    Sign in
-                  </a>
-                </>
-              )}
-            </div>
-            <p className="form-help">The account is only for publishing links and keeping ownership of what you publish. The studio works without it.</p>
-          </div>
-
-          <div className="form-row border-t border-[var(--line-soft)] pt-4">
-            <span className="eyebrow">Local data</span>
-            <p className="form-help">Runs, references, and outputs live in IndexedDB in this browser. There is no server copy until you publish.</p>
-            <button type="button" className="btn btn-small mt-3 danger" onClick={clear} onBlur={() => setConfirmClear(false)}>
-              {confirmClear ? "Confirm clear local gallery" : "Clear local gallery"}
+          <div className="input-with-action">
+            <input
+              className="input"
+              type={visible ? "text" : "password"}
+              value={key}
+              onChange={(event) => setKey(event.target.value)}
+              placeholder="sk-or-v1-..."
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="OpenRouter API key"
+            />
+            <button type="button" className="input-action" onClick={() => setVisible((value) => !value)} aria-label={visible ? "Hide key" : "Show key"}>
+              {visible ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
           </div>
-        </div>
+          <p className="field-help">Used only for requests you start. Never sent to this app's server.</p>
+          <div className="settings-actions">
+            <button type="button" className="btn btn-primary btn-sm" onClick={save}>
+              Save key
+            </button>
+            {state.settings.apiKey ? (
+              <button
+                type="button"
+                className="btn btn-quiet btn-sm"
+                onClick={() => {
+                  setKey("");
+                  studio.updateSettings({ apiKey: "" });
+                  studio.toast("Key removed from this browser.", "info");
+                }}
+              >
+                Remove
+              </button>
+            ) : null}
+          </div>
+        </section>
 
-        <footer className="modal-foot">
-          <span className="eyebrow mr-auto">models are jagged / local-first</span>
-          <button type="button" className="btn" onClick={studio.closeSettings}>
-            Done
-          </button>
-        </footer>
-      </section>
-    </div>
+        <section className="settings-section">
+          <div className="settings-section-head">
+            <span className="field-label">Models</span>
+            <button type="button" className="btn btn-quiet btn-sm" onClick={() => void studio.refreshModels()} disabled={state.models.loading}>
+              <RefreshCw size={11} className={state.models.loading ? "spin" : ""} /> Refresh
+            </button>
+          </div>
+          <p className="field-help">
+            {modelCount} models available. Updated {updated}.
+          </p>
+          {state.models.error ? <p className="field-error">{state.models.error}</p> : null}
+        </section>
+
+        <section className="settings-section">
+          <div className="settings-section-head">
+            <span className="field-label">Local data</span>
+          </div>
+          <p className="field-help">Deleting the gallery removes every local run and file from this browser. Published snapshots stay until you unpublish them.</p>
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="btn btn-danger btn-sm"
+              onClick={() => {
+                if (!confirmClear) {
+                  setConfirmClear(true);
+                  return;
+                }
+                studio.clearGallery();
+                setConfirmClear(false);
+                studio.toast("Local gallery cleared.", "info");
+              }}
+              onBlur={() => setConfirmClear(false)}
+            >
+              {confirmClear ? "Confirm clear gallery" : "Clear local gallery"}
+            </button>
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <div className="settings-section-head">
+            <span className="field-label">Account</span>
+          </div>
+          {signedIn ? (
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  void authClient.signOut().then(() => {
+                    setSignedIn(false);
+                    studio.toast("Signed out.", "info");
+                  });
+                }}
+              >
+                <LogOut size={12} /> Sign out
+              </button>
+            </div>
+          ) : (
+            <div className="settings-actions">
+              <a className="btn btn-secondary btn-sm" href={`/login?redirect=${encodeURIComponent("/")}`}>
+                Sign in to publish
+              </a>
+            </div>
+          )}
+        </section>
+      </div>
+
+      <div className="modal-foot">
+        <button type="button" className="btn btn-primary" onClick={studio.closeSettings}>
+          Done
+        </button>
+      </div>
+    </Modal>
   );
 }

@@ -1,9 +1,10 @@
 import { ArrowUpRight, Check, Copy, GitCompareArrows, RotateCcw, Square, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
-import { formatCost, formatDate, formatLatency, truncate } from "../../lib/format.ts";
-import { findCreation, studio } from "../../lib/store.ts";
+import { useState } from "react";
+import { formatDate, truncate } from "../../lib/format.ts";
+import { findCreation, findOutput, studio } from "../../lib/store.ts";
 import type { StudioState } from "../../lib/store.ts";
-import type { AssetRecord, CreationRecord, TrialRecord } from "../../lib/types.ts";
+import type { CreationRecord, OutputRecord } from "../../lib/types.ts";
+import { Modal } from "../modal.tsx";
 
 const copyText = async (text: string, label: string) => {
   try {
@@ -14,29 +15,34 @@ const copyText = async (text: string, label: string) => {
   }
 };
 
+const statusLabel = (output: OutputRecord): string => {
+  if (output.status === "queued") return "Queued";
+  if (output.status === "composing") return "Writing prompt";
+  if (output.status === "rendering") return "Rendering";
+  if (output.status === "error") return "Failed";
+  if (output.status === "cancelled") return "Stopped";
+  return "Done";
+};
+
+const sourceLabel = (output: OutputRecord): string => {
+  if (output.llmId) return `Refined by ${output.llmName ?? "a prompt model"}`;
+  return "Prompt as written";
+};
+
 export function DetailSheet({ state, onRerun }: { state: StudioState; onRerun: (creation: CreationRecord) => void }) {
   const creation = findCreation(state, state.detailId);
-  const [lightboxId, setLightboxId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
-
-  useEffect(() => {
-    if (!creation) return;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [creation]);
+  const [confirmStop, setConfirmStop] = useState(false);
 
   if (!creation) return null;
 
-  const running =
-    Boolean(state.running[creation.id]) || creation.trials.some((trial) => trial.status === "composing" || trial.status === "rendering" || trial.status === "queued");
-  const done = creation.trials.filter((trial) => trial.status === "done");
-  const failed = creation.trials.filter((trial) => trial.status === "error").length;
-  const renderCost = done.reduce((total, trial) => total + (trial.costUsd ?? 0), 0);
-  const reference = creation.referenceAssetId ? state.assets[creation.referenceAssetId] : undefined;
-  const lightboxTrial = creation.trials.find((trial) => trial.id === lightboxId) ?? null;
+  const output = creation.outputs.find((entry) => entry.id === state.focusOutputId) ?? creation.outputs[0];
+  const asset = output?.assetId ? state.assets[output.assetId] : undefined;
+  const url = output?.assetId ? state.assetUrls[output.assetId] : undefined;
+  const running = creation.outputs.some((entry) => entry.status === "composing" || entry.status === "rendering" || entry.status === "queued");
+  const done = creation.outputs.filter((entry) => entry.status === "done").length;
+  const selected = output ? state.selected.includes(output.id) : false;
 
   const unpublish = async () => {
     if (!confirmUnpublish) {
@@ -54,319 +60,226 @@ export function DetailSheet({ state, onRerun }: { state: StudioState; onRerun: (
   };
 
   return (
-    <>
-      <div className="sheet-backdrop" onClick={studio.closeDetail} aria-hidden="true" />
-      <section className="detail-sheet" role="dialog" aria-modal="true" aria-label="Run detail">
-        <header className="sheet-head">
-          <div className="min-w-0">
-            <span className="eyebrow">
-              Run / {formatDate(creation.createdAt)} / {creation.mode}
+    <Modal open={Boolean(creation)} onClose={studio.closeDetail} label="Output viewer" size="xl" className="viewer-modal">
+      {output ? (
+        <div className="viewer">
+          <div className="viewer-stage">
+            <button type="button" className="viewer-close" onClick={studio.closeDetail} aria-label="Close viewer">
+              <X size={16} />
+            </button>
+            {url ? (
+              <a href={url} target="_blank" rel="noreferrer" className="viewer-image-link" title="Open the original file">
+                <img src={url} alt={truncate(output.prompt || creation.brief, 120)} className="viewer-image" />
+              </a>
+            ) : (
+              <div className="viewer-empty">
+                {output.status === "error" ? (
+                  <>
+                    <span className="viewer-empty-title">This output failed.</span>
+                    <p>{output.error ?? "The model did not return a file."}</p>
+                  </>
+                ) : (
+                  <>
+                    <span className="spinner" />
+                    <span className="viewer-empty-title">{statusLabel(output)}</span>
+                    <p>You can close this and keep working. The grid updates as outputs arrive.</p>
+                  </>
+                )}
+              </div>
+            )}
+            <span className="viewer-count">
+              {creation.outputs.indexOf(output) + 1} / {creation.outputs.length}
             </span>
-            <h2 className="sheet-title">{creation.brief}</h2>
-            <div className="sheet-meta">
-              <span className="chip chip-orange">{creation.medium === "svg" ? "SVG" : "Image"}</span>
-              <span className="chip">{creation.trials.length} trials</span>
-              <span className="chip">{creation.rendererIds.length} renderers</span>
-              {creation.mode === "compose" ? <span className="chip">{creation.promptLlmIds.length} prompt models</span> : null}
-              <span className="chip">seed {creation.baseSeed}</span>
-              {creation.published ? <span className="chip chip-accent">published</span> : null}
-            </div>
-          </div>
-          <button type="button" className="icon-btn" onClick={studio.closeDetail} aria-label="Close run detail">
-            <X size={16} />
-          </button>
-        </header>
-
-        <div className="sheet-scroll">
-          <div className="sheet-actions">
-            <button type="button" className="btn btn-small" onClick={studio.openCompare} disabled={state.selected.length < 2}>
-              <GitCompareArrows size={13} /> Compare {state.selected.length > 0 ? `(${state.selected.length})` : ""}
-            </button>
-            <button type="button" className="btn btn-small btn-accent" onClick={() => studio.openPublish(creation.id)} disabled={done.length === 0}>
-              {creation.published ? "Update publication" : "Publish"}
-            </button>
-            {creation.published ? (
-              <>
-                <a className="btn btn-small" href={creation.published.url} target="_blank" rel="noreferrer">
-                  Public link <ArrowUpRight size={12} />
-                </a>
-                <button type="button" className="btn btn-small" onClick={() => void unpublish()} onBlur={() => setConfirmUnpublish(false)} disabled={running}>
-                  {confirmUnpublish ? "Confirm unpublish" : "Unpublish"}
-                </button>
-              </>
-            ) : null}
-            <button type="button" className="btn btn-small" onClick={() => onRerun(creation)}>
-              <RotateCcw size={12} /> Rerun setup
-            </button>
-            {running ? (
-              <button type="button" className="btn btn-small" onClick={() => studio.cancelRun(creation.id)}>
-                <Square size={10} /> Stop
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="btn btn-small danger"
-              onClick={() => {
-                if (!confirmDelete) {
-                  setConfirmDelete(true);
-                  return;
-                }
-                studio.deleteCreation(creation.id);
-                setConfirmDelete(false);
-              }}
-              onBlur={() => setConfirmDelete(false)}
-            >
-              <Trash2 size={12} /> {confirmDelete ? "Really delete" : "Delete local"}
-            </button>
           </div>
 
-          <div className="sheet-stats">
-            <div className="sheet-stat">
-              <span className="eyebrow">Prompt cost</span>
-              <strong>{creation.promptCostUsd > 0 ? formatCost(creation.promptCostUsd) : "—"}</strong>
-            </div>
-            <div className="sheet-stat">
-              <span className="eyebrow">Render cost</span>
-              <strong>{renderCost > 0 ? formatCost(renderCost) : "—"}</strong>
-            </div>
-            <div className="sheet-stat">
-              <span className="eyebrow">Outputs</span>
-              <strong>
-                {done.length}/{creation.trials.length}
-              </strong>
-            </div>
-            <div className="sheet-stat">
-              <span className="eyebrow">Failures</span>
-              <strong>{failed}</strong>
-            </div>
-            <div className="sheet-stat">
-              <span className="eyebrow">Frame</span>
-              <strong>{creation.aspectRatio}</strong>
-            </div>
-            <div className="sheet-stat">
-              <span className="eyebrow">Trials / model</span>
-              <strong>{creation.variants}</strong>
-            </div>
-          </div>
-
-          {reference ? (
-            <div className="reference-row">
-              <img src={state.assetUrls[reference.id]} alt="Reference for this run" />
-              <div>
-                <span className="eyebrow">Reference image</span>
-                <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
-                  {reference.width && reference.height ? `${reference.width}×${reference.height} · ` : ""}
-                  {truncate(reference.mime, 40)} · passed to models that accept image input.
-                </p>
+          <aside className="viewer-panel">
+            <div className="viewer-head">
+              <span className="viewer-kicker">{formatDate(creation.createdAt)}</span>
+              <h2 className="viewer-title">{creation.brief}</h2>
+              <div className="viewer-meta">
+                <span className="chip">{creation.medium === "svg" ? "SVG" : "Image"}</span>
+                <span className="chip">{creation.mode === "compose" ? "Refined" : "As written"}</span>
+                <span className="chip">
+                  {done}/{creation.outputs.length} outputs
+                </span>
+                {creation.published ? <span className="chip chip-success">Published</span> : null}
               </div>
             </div>
+
+            <div className="viewer-section">
+              <div className="viewer-section-head">
+                <span className="viewer-label">Prompt</span>
+                <button type="button" className="btn btn-quiet btn-sm" onClick={() => void copyText(output.prompt || creation.brief, "Prompt")}>
+                  <Copy size={12} /> Copy
+                </button>
+              </div>
+              <p className="viewer-prompt">{output.prompt || creation.brief}</p>
+              <p className="viewer-source">
+                <strong>{sourceLabel(output)}</strong>
+              </p>
+            </div>
+
+            <div className="viewer-section">
+              <span className="viewer-label">Model</span>
+              <p className="viewer-model">{output.modelName}</p>
+              <p className="viewer-model-id">{output.modelId}</p>
+              <p className="viewer-size">
+                {creation.aspectRatio}
+                {asset?.width && asset.height ? ` · ${asset.width} × ${asset.height}` : ""}
+                {output.status === "done" ? ` · ${asset?.mime.replace("image/", "").toUpperCase() ?? ""}` : ""}
+              </p>
+            </div>
+
+            <div className="viewer-actions">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => studio.toggleSelected(output.id)} disabled={output.status !== "done"}>
+                {selected ? <Check size={12} /> : <GitCompareArrows size={12} />}
+                {selected ? "In compare" : "Add to compare"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  studio.closeDetail();
+                  studio.openCompare();
+                }}
+                disabled={state.selected.length < 2}
+              >
+                Compare {state.selected.length > 0 ? `(${state.selected.length})` : ""}
+              </button>
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => studio.openPublish(creation.id)} disabled={done === 0}>
+                {creation.published ? "Update publication" : "Publish"}
+              </button>
+              {url ? (
+                <a className="btn btn-secondary btn-sm" href={url} target="_blank" rel="noreferrer">
+                  <ArrowUpRight size={12} /> Original
+                </a>
+              ) : null}
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => onRerun(creation)}>
+                <RotateCcw size={12} /> Rerun setup
+              </button>
+              {running ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    if (!confirmStop) {
+                      setConfirmStop(true);
+                      return;
+                    }
+                    studio.cancelRun(creation.id);
+                    setConfirmStop(false);
+                  }}
+                  onBlur={() => setConfirmStop(false)}
+                >
+                  <Square size={10} /> {confirmStop ? "Confirm stop" : "Stop"}
+                </button>
+              ) : null}
+              {creation.published ? (
+                <>
+                  <a className="btn btn-secondary btn-sm" href={creation.published.url} target="_blank" rel="noreferrer">
+                    Public link <ArrowUpRight size={12} />
+                  </a>
+                  <button type="button" className="btn btn-quiet btn-sm" onClick={() => void unpublish()} onBlur={() => setConfirmUnpublish(false)}>
+                    {confirmUnpublish ? "Confirm unpublish" : "Unpublish"}
+                  </button>
+                </>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-danger btn-sm"
+                onClick={() => {
+                  if (!confirmDelete) {
+                    setConfirmDelete(true);
+                    return;
+                  }
+                  studio.deleteCreation(creation.id);
+                  setConfirmDelete(false);
+                }}
+                onBlur={() => setConfirmDelete(false)}
+              >
+                <Trash2 size={12} /> {confirmDelete ? "Confirm delete" : "Delete run"}
+              </button>
+            </div>
+          </aside>
+
+          {creation.outputs.length > 1 ? (
+            <div className="viewer-strip" aria-label="Outputs in this run">
+              {creation.outputs.map((entry) => {
+                const entryUrl = entry.assetId ? state.assetUrls[entry.assetId] : undefined;
+                return (
+                  <button
+                    type="button"
+                    key={entry.id}
+                    className="viewer-thumb"
+                    data-active={entry.id === output.id}
+                    onClick={() => studio.setFocusOutput(entry.id)}
+                    title={`${entry.modelName} · ${statusLabel(entry)}`}
+                    aria-label={`View ${entry.modelName} output`}
+                  >
+                    {entryUrl ? <img src={entryUrl} alt="" /> : <span>{statusLabel(entry)}</span>}
+                  </button>
+                );
+              })}
+            </div>
           ) : null}
-
-          <div className="mt-6 flex items-center justify-between gap-3">
-            <span className="eyebrow">Every trial</span>
-            <span className="eyebrow">Select up to 4 to compare</span>
-          </div>
-
-          <div className="trial-grid">
-            {creation.trials.map((trial) => (
-              <TrialCard
-                key={trial.id}
-                trial={trial}
-                assetUrl={trial.assetId ? state.assetUrls[trial.assetId] : undefined}
-                selected={state.selected.includes(trial.id)}
-                onSelect={() => studio.toggleSelected(trial.id)}
-                onOpen={() => setLightboxId(trial.id)}
-              />
-            ))}
-          </div>
-
-          <p className="mt-8 max-w-[70ch] font-mono text-[9px] leading-relaxed text-[var(--muted)]">
-            Deleting a local run removes its outputs from this browser. A published snapshot is independent until you unpublish it. The public catalog never receives your
-            OpenRouter key.
-          </p>
         </div>
-      </section>
-
-      {lightboxTrial ? (
-        <TrialLightbox
-          creation={creation}
-          trial={lightboxTrial}
-          asset={lightboxTrial.assetId ? state.assets[lightboxTrial.assetId] : undefined}
-          assetUrl={lightboxTrial.assetId ? state.assetUrls[lightboxTrial.assetId] : undefined}
-          selected={state.selected.includes(lightboxTrial.id)}
-          onToggle={() => studio.toggleSelected(lightboxTrial.id)}
-          onClose={() => setLightboxId(null)}
-        />
       ) : null}
-    </>
+    </Modal>
   );
 }
 
-function TrialCard({
-  trial,
-  assetUrl,
-  selected,
-  onSelect,
-  onOpen,
-}: {
-  trial: TrialRecord;
-  assetUrl?: string;
-  selected: boolean;
-  onSelect: () => void;
-  onOpen: () => void;
-}) {
-  const busy = trial.status === "composing" || trial.status === "rendering" || trial.status === "queued";
-  return (
-    <article className="trial-card" data-selected={selected}>
-      <div className="trial-media">
-        {assetUrl ? (
-          <button type="button" className="trial-open" onClick={onOpen} aria-label={`Open ${trial.modelName} output`}>
-            <img src={assetUrl} alt={`${trial.modelName} output for ${truncate(trial.prompt || trial.promptSource, 80)}`} loading="lazy" />
-          </button>
-        ) : null}
-        {busy ? (
-          <div className="trial-status">
-            <div>
-              <div className="spinner" />
-              <span className="status-label">{trial.status === "composing" ? "Composing prompt" : trial.status === "rendering" ? "Rendering" : "Queued"}</span>
-            </div>
-          </div>
-        ) : null}
-        {trial.status === "error" ? (
-          <div className="trial-status" data-tone="error">
-            <div>
-              <span className="status-label text-[var(--orange)]">Failed</span>
-              <p className="status-error">{trial.error ?? "The model did not return an output."}</p>
-            </div>
-          </div>
-        ) : null}
-        {trial.status === "cancelled" ? (
-          <div className="trial-status">
-            <span className="status-label text-[var(--muted)]">Cancelled</span>
-          </div>
-        ) : null}
-        {trial.status === "done" && !assetUrl ? (
-          <div className="trial-status" data-tone="error">
-            <span className="status-label">File missing</span>
-          </div>
-        ) : null}
-        {trial.status === "done" ? (
-          <button
-            type="button"
-            className="trial-select"
-            data-selected={selected}
-            onClick={onSelect}
-            aria-pressed={selected}
-            aria-label={selected ? "Remove from comparison" : "Add to comparison"}
-            title={selected ? "Remove from comparison" : "Add to comparison"}
-          >
-            {selected ? <Check size={12} /> : "+"}
-          </button>
-        ) : null}
-      </div>
-      <div className="trial-body">
-        <div className="trial-model">{trial.modelName}</div>
-        <div className="trial-source">
-          {trial.promptSource} · {trial.medium === "svg" ? "SVG" : "image"}
-        </div>
-        <p className="trial-prompt">{trial.prompt || "Waiting for the prompt composer…"}</p>
-        <div className="trial-foot">
-          <span>seed {trial.seed ?? "—"}</span>
-          <span>·</span>
-          <span>{formatCost(trial.costUsd)}</span>
-          <span>·</span>
-          <span>{formatLatency(trial.latencyMs)}</span>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function TrialLightbox({
-  creation,
-  trial,
-  asset,
-  assetUrl,
-  selected,
-  onToggle,
-  onClose,
-}: {
-  creation: CreationRecord;
-  trial: TrialRecord;
-  asset?: AssetRecord;
-  assetUrl?: string;
-  selected: boolean;
-  onToggle: () => void;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+export function CompareScreen({ state }: { state: StudioState }) {
+  const selected = state.selected
+    .map((outputId) => findOutput(state, outputId))
+    .filter((entry): entry is { creation: CreationRecord; output: OutputRecord } => entry !== null);
 
   return (
-    <div className="lightbox" role="dialog" aria-modal="true" aria-label={`${trial.modelName} output`}>
-      <button type="button" className="icon-btn lightbox-close" onClick={onClose} aria-label="Close output">
-        <X size={16} />
-      </button>
-      <div className="lightbox-media">{assetUrl ? <img src={assetUrl} alt={`${trial.modelName} output`} /> : <span className="eyebrow">No file</span>}</div>
-      <aside className="lightbox-meta">
-        <span className="eyebrow">Output / {trial.medium === "svg" ? "vector" : "raster"}</span>
-        <h2>{trial.modelName}</h2>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <span className="chip">{trial.promptSource}</span>
-          <span className="chip">seed {trial.seed ?? "—"}</span>
-          <span className="chip">{formatCost(trial.costUsd)}</span>
-          <span className="chip">{formatLatency(trial.latencyMs)}</span>
+    <Modal open={state.compareOpen} onClose={studio.closeCompare} label="Compare outputs" size="xl" className="compare-modal">
+      <div className="compare-head">
+        <div>
+          <span className="viewer-label">Compare</span>
+          <h2 className="compare-title">{selected.length} outputs, one brief.</h2>
         </div>
-
-        <div className="lightbox-block">
-          <span className="eyebrow">Prompt</span>
-          <p className="lightbox-prompt">{trial.prompt || "No prompt recorded."}</p>
-        </div>
-
-        <div className="lightbox-block">
-          <span className="eyebrow">Provenance</span>
-          <div className="lightbox-kv">
-            <div>
-              <span className="eyebrow !text-[rgba(246,241,228,0.42)]">Prompt source</span>
-              <strong>{trial.llmName ?? "You"}</strong>
-            </div>
-            <div>
-              <span className="eyebrow !text-[rgba(246,241,228,0.42)]">Renderer</span>
-              <strong>{trial.modelId}</strong>
-            </div>
-            <div>
-              <span className="eyebrow !text-[rgba(246,241,228,0.42)]">Media</span>
-              <strong>{asset?.mime ?? "—"}</strong>
-            </div>
-            <div>
-              <span className="eyebrow !text-[rgba(246,241,228,0.42)]">Pixels</span>
-              <strong>{asset?.width && asset.height ? `${asset.width}×${asset.height}` : "vector / unknown"}</strong>
-            </div>
-            <div>
-              <span className="eyebrow !text-[rgba(246,241,228,0.42)]">Run</span>
-              <strong>{truncate(creation.brief, 42)}</strong>
-            </div>
-            <div>
-              <span className="eyebrow !text-[rgba(246,241,228,0.42)]">Created</span>
-              <strong>{formatDate(creation.createdAt)}</strong>
-            </div>
-          </div>
-        </div>
-
-        <div className="lightbox-actions">
-          <button type="button" className="btn btn-small" onClick={() => void copyText(trial.prompt, "Prompt")}>
-            <Copy size={12} /> Copy prompt
+        <div className="compare-head-actions">
+          <button type="button" className="btn btn-quiet btn-sm" onClick={studio.clearSelected}>
+            Clear
           </button>
-          <button type="button" className={`btn btn-small ${selected ? "btn-accent" : ""}`} onClick={onToggle}>
-            <GitCompareArrows size={12} /> {selected ? "In comparison" : "Compare"}
+          <button type="button" className="viewer-close viewer-close-static" onClick={studio.closeCompare} aria-label="Close comparison">
+            <X size={16} />
           </button>
         </div>
-      </aside>
-    </div>
+      </div>
+      {selected.length < 2 ? (
+        <div className="compare-empty">
+          <p>Pick at least two outputs. Open an output, then use Add to compare.</p>
+        </div>
+      ) : (
+        <div className="compare-grid" data-count={selected.length}>
+          {selected.map(({ creation, output }) => {
+            const url = output.assetId ? state.assetUrls[output.assetId] : undefined;
+            return (
+              <article className="compare-cell" key={output.id}>
+                <div className="compare-media">{url ? <img src={url} alt={`${output.modelName} output`} /> : <span>{statusLabel(output)}</span>}</div>
+                <div className="compare-copy">
+                  <h3>{output.modelName}</h3>
+                  <p className="compare-meta">
+                    {creation.medium === "svg" ? "SVG" : "Image"} · {sourceLabel(output)}
+                  </p>
+                  <p className="compare-prompt">{output.prompt || creation.brief}</p>
+                  <div className="compare-actions">
+                    <button type="button" className="btn btn-quiet btn-sm" onClick={() => void copyText(output.prompt || creation.brief, "Prompt")}>
+                      <Copy size={11} /> Copy
+                    </button>
+                    <button type="button" className="btn btn-quiet btn-sm" onClick={() => studio.toggleSelected(output.id)}>
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </Modal>
   );
 }
