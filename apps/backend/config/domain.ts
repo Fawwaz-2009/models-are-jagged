@@ -34,10 +34,13 @@ export const websiteDomain = Effect.gen(function* () {
 });
 
 /**
- * The public catalog's hostname. Same stage rules as the app, with a `pub.`
- * label: `<pub>.<slug>.<root>` in production, `<pub>.<slug>-<stage>.<root>`
- * on every other stage. Null when no root domain is configured; the app then
- * falls back to its own origin for public links and assets.
+ * The public catalog's hostname. One label UNDER the zone, not two:
+ * `<slug>-pub.<root>` in production, `<slug>-<stage>-pub.<root>` on every
+ * other stage. A `pub.<slug>.<root>` name sits below the zone's wildcard
+ * certificate and fails the TLS handshake; keeping the catalog on the same
+ * label depth as the studio costs nothing and uses the certificate the zone
+ * already owns. Null when no root domain is configured; the app then falls
+ * back to its own origin for public links and assets.
  */
 export const publicWebsiteDomain = Effect.gen(function* () {
   const appSlug = yield* Config.String("APP_SLUG").pipe(Config.withDefault("app"), Effect.orDie);
@@ -48,7 +51,7 @@ export const publicWebsiteDomain = Effect.gen(function* () {
   }
   const stage = stack.value.stage;
   if (baseDomain._tag === "None") return null;
-  return stage === "prod" ? `pub.${appSlug}.${baseDomain.value}` : `pub.${appSlug}-${stage}.${baseDomain.value}`;
+  return stage === "prod" ? `${appSlug}-pub.${baseDomain.value}` : `${appSlug}-${stage}-pub.${baseDomain.value}`;
 });
 
 /**
