@@ -131,7 +131,7 @@ export default class Backend extends Cloudflare.Worker<Backend>()(
           const session = yield* authInstance.getSession(new Headers(request.headers)).pipe(Effect.orDie);
           if (!session?.user) return errorJson(401, "Sign in to unpublish.");
 
-          const url = new URL(request.url);
+          const url = new URL(request.url, "http://backend");
           const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
           if (!id) return errorJson(400, "Missing publication id.");
 
@@ -156,7 +156,7 @@ export default class Backend extends Cloudflare.Worker<Backend>()(
         "/api/public/feed",
         Effect.gen(function* () {
           const request = yield* HttpServerRequest;
-          const url = new URL(request.url);
+          const url = new URL(request.url, "http://backend");
           const handle = url.searchParams.get("handle")?.trim() || undefined;
           const requested = Number(url.searchParams.get("limit") ?? 48);
           const limit = Number.isFinite(requested) ? requested : 48;
@@ -169,7 +169,7 @@ export default class Backend extends Cloudflare.Worker<Backend>()(
         "/api/public/publications/:id",
         Effect.gen(function* () {
           const request = yield* HttpServerRequest;
-          const url = new URL(request.url);
+          const url = new URL(request.url, "http://backend");
           const id = decodeURIComponent(url.pathname.split("/").pop() ?? "");
           if (!id) return errorJson(400, "Missing publication id.");
           const publications = yield* Publications;
