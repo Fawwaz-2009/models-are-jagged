@@ -10,8 +10,9 @@ import { Label } from "@/components/ui/label";
 import { AuthCard } from "./-components/auth-card";
 
 export const Route = createFileRoute("/login/")({
-  validateSearch: (search: Record<string, unknown>): { email?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { email?: string; redirect?: string } => ({
     email: typeof search.email === "string" ? search.email : undefined,
+    redirect: typeof search.redirect === "string" ? search.redirect : undefined,
   }),
   component: Login,
 });
@@ -32,8 +33,7 @@ const emailFormSchema = Schema.toStandardSchemaV1(
 type EmailValues = typeof emailFormSchema.Type;
 
 function Login() {
-  const { appName } = Route.useLoaderData() ?? { appName: "App" };
-  const { email: returningEmail } = Route.useSearch();
+  const { email: returningEmail, redirect } = Route.useSearch();
   const navigate = useNavigate();
 
   const emailForm = useForm<EmailValues>({
@@ -49,12 +49,12 @@ function Login() {
       return normalized;
     },
     onSuccess: (normalized) => {
-      navigate({ to: "/login/code", search: { email: normalized } });
+      navigate({ to: "/login/code", search: { email: normalized, redirect } });
     },
   });
 
   return (
-    <AuthCard title={`Sign in to ${appName}`} description="Passwordless: the first sign-in with any email creates the account.">
+    <AuthCard title="Sign in to publish" description="Passwordless: the first sign-in with any email creates the account.">
       <form onSubmit={emailForm.handleSubmit((values) => sendCode.mutate(values))} className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="email">Email</Label>

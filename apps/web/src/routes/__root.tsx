@@ -11,23 +11,22 @@ interface RouterContext {
 }
 
 /**
- * Runtime identity from the Worker's bindings: the wordmark and page title
- * follow APP_NAME, and STAGE tells preview deploys where they are. Server
- * function so the env import never reaches the client bundle.
+ * Runtime identity from the Worker's bindings. `PUBLIC_MODE` is the one
+ * switch between the two deploy units: the studio (composer, local gallery,
+ * publishing) and the public catalog (published runs only). Both read the
+ * same code and the same backend; only the shell and the write actions differ.
  */
-// The production origin: canonical, og:url, and og:image point here even
-// from a preview stage, which is what scrapers and search engines should
-// index. The template ships it empty (the head omits canonical and the OG
-// image tags while it is empty) and fills it once a final origin exists:
-// https://<slug>.<ROOT_DOMAIN> after the domain lands. Proof has its
-// domain, so it carries the real one.
-const SITE_URL = "https://proof.fawwaz.dev";
-
 export const getAppMeta = createServerFn({ method: "GET" }).handler(async () => {
+  const appOrigin = (env.APP_ORIGIN as string | undefined) ?? "";
+  const publicOrigin = (env.PUBLIC_ORIGIN as string | undefined) ?? "";
+  const publicMode = (env.PUBLIC_MODE as string | undefined) === "true";
   return {
-    appName: (env.APP_NAME as string | undefined) ?? "App",
+    appName: (env.APP_NAME as string | undefined) ?? "models are jagged",
     stage: (env.STAGE as string | undefined) ?? "",
-    url: SITE_URL,
+    appOrigin,
+    publicOrigin,
+    publicMode,
+    url: publicMode ? publicOrigin : appOrigin,
   };
 });
 
@@ -35,8 +34,9 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   loader: () => getAppMeta(),
   head: ({ match }) => {
     const { appName, url } = match.loaderData ?? { appName: "App", url: "" };
-    const description =
-      "Proof is a starter with a pipeline: an agent builds each issue in isolation, every pull request ships with a running proof on your own domain, and merge ships it.";
+    const description = match.loaderData?.publicMode
+      ? "A public catalog of runs: one brief, many models, every output side by side."
+      : "A local-first studio for comparing one brief across language models and image models. Your key stays in your browser.";
     return {
       meta: [
         { charSet: "utf-8" },
@@ -100,17 +100,8 @@ function Document({ children }: Readonly<{ children: ReactNode }>) {
     <html lang="en">
       <head>
         <HeadContent />
-        {/* Dark mode is class-based (shadcn variables read html.dark); this
-            syncs the OS preference before first paint. The full three-way
-            toggle (light, dark, system with localStorage) is the same line
-            with a stored preference folded in: see docs/faq.md. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `document.documentElement.classList.toggle("dark", window.matchMedia("(prefers-color-scheme: dark)").matches)`,
-          }}
-        />
       </head>
-      <body className="bg-white font-sans text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
+      <body className="bg-[var(--paper)] font-sans text-[var(--ink)] antialiased">
         {children}
         <Scripts />
       </body>

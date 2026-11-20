@@ -25,7 +25,7 @@ import * as Layer from "effect/Layer";
 import Backend from "./apps/backend/src/worker.ts";
 import { d1Database } from "./apps/backend/config/database/index.ts";
 import { FilesBucket } from "./apps/backend/config/storage.ts";
-import { Website } from "./website.ts";
+import { PublicWebsite, Website } from "./website.ts";
 
 // The stack name is the infrastructure's state scope: the address under
 // which alchemy remembers every resource it made, and it determines the
@@ -46,6 +46,7 @@ export default Alchemy.Stack(
     const bucket = yield* FilesBucket;
     const backend = yield* Backend;
     const website = yield* Website;
+    const publicWebsite = yield* PublicWebsite;
     // CI preview deploys announce their stage URL on the PR. The comment is
     // a state-tracked resource: the constant logical id updates the same
     // comment on every push, and its body reads the Website resource's real
@@ -58,7 +59,7 @@ export default Alchemy.Stack(
         repository,
         issueNumber: Number(process.env.PULL_REQUEST),
         body: Output.interpolate`
-          ⚡ **Preview:** ${website.url} · stage \`${process.env.STAGE ?? `pr-${process.env.PULL_REQUEST}`}\` · \`${(process.env.GITHUB_SHA ?? "").slice(0, 7)}\`
+          ⚡ **Studio:** ${website.url} · **Catalog:** ${publicWebsite.url} · stage \`${process.env.STAGE ?? `pr-${process.env.PULL_REQUEST}`}\` · \`${(process.env.GITHUB_SHA ?? "").slice(0, 7)}\`
 
           _This comment updates automatically with each push._
         `,
@@ -66,6 +67,7 @@ export default Alchemy.Stack(
     }
     return {
       url: website.url,
+      publicUrl: publicWebsite.url,
       backendWorkerName: backend.workerName,
       databaseId: database.databaseId,
       bucketName: bucket.bucketName,

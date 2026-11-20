@@ -12,6 +12,7 @@ import { AuthCard } from "./-components/auth-card";
 export const Route = createFileRoute("/login/code")({
   validateSearch: (search: Record<string, unknown>) => ({
     email: typeof search.email === "string" ? search.email : "",
+    redirect: typeof search.redirect === "string" ? search.redirect : undefined,
   }),
   beforeLoad: ({ search }) => {
     if (!search.email) throw redirect({ to: "/login" });
@@ -27,7 +28,7 @@ const codeFormSchema = Schema.toStandardSchemaV1(
 type CodeValues = typeof codeFormSchema.Type;
 
 function CodePage() {
-  const { email } = Route.useSearch();
+  const { email, redirect: redirectTo } = Route.useSearch();
 
   // Capture stages: a six-digit local part IS the code (config/auth.ts in
   // the backend), so the field prefills with no backend call. In prod the
@@ -46,7 +47,7 @@ function CodePage() {
       if (result.error) throw new Error(result.error.message || "We could not verify that code.");
     },
     onSuccess: () => {
-      window.location.href = "/demo";
+      window.location.href = redirectTo || "/";
     },
   });
 
@@ -74,7 +75,7 @@ function CodePage() {
       </form>
       <p className="mt-3 text-sm text-muted-foreground">
         Wrong address?{" "}
-        <Link to="/login" search={{ email }} className="text-primary underline">
+        <Link to="/login" search={{ email, redirect: redirectTo }} className="text-primary underline">
           Change email
         </Link>
       </p>

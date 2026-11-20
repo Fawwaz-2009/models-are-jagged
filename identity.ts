@@ -6,4 +6,4 @@
 // deploy provisions fresh ones beside them. Everything else reads its
 // identity from env (APP_NAME, APP_SLUG) or is generic; this is the
 // only literal. See docs/faq.md.
-export const STACK = "Proof";
+export const STACK = "ModelsAreJagged";
