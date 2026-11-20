@@ -2,7 +2,12 @@ import { ArrowUpRight, Check, Copy, ExternalLink, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authClient } from "../../auth-client.ts";
 import { findCreation, studio, useStudio } from "../../lib/store.ts";
-import { truncate } from "../../lib/format.ts";
+
+const defaultTitle = (brief: string): string => {
+  const clean = brief.replace(/\s+/g, " ").trim();
+  const firstClause = clean.split(/[,.;:]/)[0]?.trim() ?? clean;
+  return (firstClause.length >= 8 ? firstClause : clean).slice(0, 140);
+};
 
 const copyUrl = async (url: string) => {
   try {
@@ -27,7 +32,7 @@ export function PublishDialog({ publicOrigin }: { publicOrigin: string }) {
 
   useEffect(() => {
     if (!state.publishId || !creation) return;
-    setTitle(truncate(creation.brief.replace(/\s+/g, " "), 80));
+    setTitle(defaultTitle(creation.brief));
     setTags("");
     setSelected(creation.trials.filter((trial) => trial.status === "done").map((trial) => trial.id));
     setError(null);
