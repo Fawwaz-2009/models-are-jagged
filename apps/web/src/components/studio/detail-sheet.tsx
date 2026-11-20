@@ -90,7 +90,7 @@ export function DetailSheet({ state, onRerun }: { state: StudioState; onRerun: (
                 <a className="btn btn-small" href={creation.published.url} target="_blank" rel="noreferrer">
                   Public link <ArrowUpRight size={12} />
                 </a>
-                <button type="button" className="btn btn-small" onClick={() => void unpublish()} disabled={running}>
+                <button type="button" className="btn btn-small" onClick={() => void unpublish()} onBlur={() => setConfirmUnpublish(false)} disabled={running}>
                   {confirmUnpublish ? "Confirm unpublish" : "Unpublish"}
                 </button>
               </>

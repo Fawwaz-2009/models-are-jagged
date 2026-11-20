@@ -161,7 +161,7 @@ export function SettingsDialog() {
           <div className="form-row border-t border-[var(--line-soft)] pt-4">
             <span className="eyebrow">Local data</span>
             <p className="form-help">Runs, references, and outputs live in IndexedDB in this browser. There is no server copy until you publish.</p>
-            <button type="button" className="btn btn-small mt-3 danger" onClick={clear}>
+            <button type="button" className="btn btn-small mt-3 danger" onClick={clear} onBlur={() => setConfirmClear(false)}>
               {confirmClear ? "Confirm clear local gallery" : "Clear local gallery"}
             </button>
           </div>
